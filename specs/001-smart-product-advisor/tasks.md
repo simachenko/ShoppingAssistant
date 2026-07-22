@@ -224,19 +224,102 @@ one clarifying question is asked before any recommendation.
       honest no-match) against the docker-compose–orchestrated stack in
       `tests/EndToEnd.Tests/RecommendationScenarioTests.cs` (depends on T043, T025), plus
       `DockerComposeStackFixture` (seeds `CatalogSeedData`/`PricingSeedData` into the running
-      stack's databases if not already present — the T025 seeding mechanism). Compiles; requires
-      `docker compose up --build` AND a real `LLM_PROVIDER_*` key (natural-language
-      understanding is deliberately the LLM's job here, so this is the one suite that can't run
-      without a live model) — neither is available in this sandbox, so it is unverified here.
+      stack's databases if not already present — the T025 seeding mechanism). Compiles.
+      **Live-verified** (Docker + a real LLM key became available mid-session): brought up the
+      full `docker compose` stack and drove Scenarios 1–3 through the real Gateway → Advisor →
+      LLM → Catalog/Pricing path via curl and, separately, through the actual Blazor UI in a
+      browser. Found and fixed three real defects surfaced only by this live run:
+      (1) Catalog's search endpoint required `page`/`pageSize` query params instead of
+      defaulting them — 400 on any request that omitted them; (2) `ScoringPolicy`'s
+      requirement-to-spec matching only checked one substring direction, so an LLM-extracted
+      feature like `"camera"` never matched the catalog's `"camera_mp"` key; (3) migrations
+      and demo seed data were never wired into the real services' startup, only into tests —
+      added migrate-on-startup and a config-gated (`SeedDemoData`) seed-if-empty step to
+      `ProductCatalog.Api`/`PricingAvailability.Api`/`ProductAdvisor.Api`, with the demo dataset
+      now duplicated into each service's own Infrastructure project (production code must not
+      reference the test-only `TestSupport` project). Also had to loosen `global.json`'s SDK
+      pin (`10.0.302` → `10.0.100`/`latestFeature`) since the published SDK Docker image lags
+      the locally installed preview SDK.
       **Full solution build**: all 28 projects build with 0 warnings/0 errors.
-      **Full non-Docker test run**: 59/59 passing (15 Catalog domain, 14 Pricing domain, 21
-      Advisor domain incl. ScoringPolicy, 3 Application orchestrator, 6 Advisor MCP tool
-      contract via a real in-process MCP client). Docker-dependent suites (Catalog/Pricing/
-      Advisor-conversation contract tests, this EndToEnd suite) compile and fail only at the
-      Docker-connect step in this sandbox — verified via the identical failure signature as a
+      **Full non-Docker test run**: 60/60 passing (15 Catalog domain, 14 Pricing domain, 23
+      Advisor domain incl. ScoringPolicy — now with regression tests for the token-overlap
+      matching fix, 3 Application orchestrator, 6 Advisor MCP tool contract via a real
+      in-process MCP client). Docker-dependent contract-test suites (Catalog/Pricing/
+      Advisor-conversation) still fail only at the Docker-connect step *in this stateless
+      sandbox environment* (no persistent Docker daemon across turns) — verified via the
       plain `docker run` in this environment, i.e., not a code defect.
 
 **Checkpoint**: User Story 1 is fully functional and independently demoable (MVP).
+
+---
+
+## Phase 3.5: Streaming & Rich Response Rendering (US1 Enhancement)
+
+> **Numbering note**: this phase was added during a spec-refinement pass after Phase 3 shipped,
+> so its task IDs (T073+) continue from the highest number then in use rather than fitting
+> between T044 and T045. It must still be completed **before** Phase 4/5 — see spec.md
+> FR-015/FR-016/FR-017, SC-008/SC-009, and research.md §11–§12 for the requirements and design
+> this phase implements.
+
+**Goal**: The existing US1 chat experience delivers its narration progressively over SSE
+(FR-015) instead of only after the full answer is ready, and renders that narration plus the
+structured facts (specs, matched requirements, trade-offs) with real formatting — Markdown for
+the LLM's text, actual HTML lists/tables for the facts — instead of a single prose block
+(FR-016/FR-017). No grounding guarantee changes: streaming only staggers delivery of narration
+text, and facts are still only ever rendered from tool-produced structured data, never from
+LLM-authored Markdown.
+
+**Independent Test**: Send a fully-specified request through the streaming endpoint and confirm
+`token` events arrive before the final `result` event and concatenate to the same text as
+`result.message`; confirm the rendered page shows headings/bold/bullet lists instead of literal
+`**`/`-` characters, and that matched requirements/trade-offs render as real `<ul>/<li>` items.
+
+### Tasks
+
+- [X] T073 [P] Add a new `tests/WebApp.Blazor.Tests` xUnit project to the solution, referencing
+      `src/WebApp/WebApp.Blazor`.
+- [X] T074 [P] Add `Markdig` and an HTML allow-list sanitizer package to
+      `src/WebApp/WebApp.Blazor`; implement `NarrationMarkdownRenderer.ToSafeHtml(string markdown)`
+      in `src/WebApp/WebApp.Blazor/Rendering/` — Markdig pipeline with the raw-HTML-passthrough
+      extension disabled, output run through the sanitizer before use as a `MarkupString`
+      (research.md §12).
+- [X] T075 [P] Unit tests for `NarrationMarkdownRenderer` — headings/bold/bullet lists render as
+      the expected HTML; a `<script>` tag, an `onclick` attribute, and a `javascript:` link in
+      the input are all stripped — in `tests/WebApp.Blazor.Tests/NarrationMarkdownRendererTests.cs`
+      (depends on T073, T074).
+- [X] T076 Implement `POST /api/conversations/{sessionId}/messages/stream` on
+      `src/ProductAdvisor/ProductAdvisor.Api/` using `IChatClient.GetStreamingResponseAsync`
+      (`FunctionInvokingChatClient` resolves tool calls / `IToolResultCapture` exactly as the
+      non-streaming path); emits the `token`/`result` SSE event sequence
+      (contracts/advisor-conversation-api.md) (depends on T041).
+- [X] T077 [P] Contract test for the streaming endpoint — concatenated `token` deltas equal
+      `result.message`; `result`'s structured fields are byte-identical to the non-streaming
+      endpoint's response for the same stubbed tool output; a stream forcibly cut before
+      `result` is detectable as incomplete — in
+      `tests/ProductAdvisor.Api.Tests/StreamingConversationApiContractTests.cs` (depends on T076).
+- [X] T078 Implement `POST /api/chat/messages/stream` on `src/Gateway/Gateway.Api/`, proxying the
+      Advisor's SSE stream and merging the resolved `sessionId` into the `result` event
+      (contracts/gateway-bff-api.md) (depends on T076, T042).
+- [X] T079 [P] Contract test for the Gateway streaming endpoint — `sessionId` correctly merged
+      into `result`; exactly-one-session-created guarantee holds for the streaming path too — in
+      `tests/Gateway.Api.Tests/StreamingChatContractTests.cs` (depends on T078).
+- [X] T080 Update the Blazor chat page to call `POST /api/chat/messages/stream` from its own
+      server-side code (reading the SSE response incrementally via .NET's built-in SSE parser),
+      append each `token` event's `delta` to the in-progress narration and re-render, and fall
+      back to the non-streaming endpoint if the connection ends without a `result` event — in
+      `src/WebApp/WebApp.Blazor/Components/Pages/Home.razor` (depends on T078).
+- [X] T081 Render the narration through `NarrationMarkdownRenderer` (as a `MarkupString`) and
+      render specifications/matched-requirements/trade-offs as real `<ul>/<li>` elements instead
+      of `string.Join(...)` text in the recommendation card — in `Home.razor` (depends on T075,
+      T080).
+- [X] T082 Manually re-verify quickstart Scenarios 1–3 and 6 (Pricing outage) against the running
+      stack with streaming enabled: confirm the answer visibly appears progressively, renders
+      with real formatting (not literal Markdown characters), and that the Pricing-outage
+      fallback still yields a complete, honestly-partial streamed response rather than a stuck
+      or truncated one.
+
+**Checkpoint**: US1's chat experience streams and renders richly; Phases 4/5 (US2/US3) can
+build on top of it, reusing the same streaming/rendering plumbing for comparisons.
 
 ---
 
@@ -370,7 +453,11 @@ nonexistent product and confirm an honest "not found" response.
 - **Setup (Phase 1)**: No dependencies — start immediately.
 - **Foundational (Phase 2)**: Depends on Setup — BLOCKS all user stories.
 - **User Story 1 (Phase 3)**: Depends only on Foundational. No dependency on US2/US3.
-- **User Story 2 (Phase 4)**: Depends only on Foundational; reuses US1's data-access tool
+- **Streaming & Rich Rendering (Phase 3.5)**: Depends on Phase 3 (US1) being functional — it
+  streams/reformats the same conversation turn US1 already produces. By explicit direction, it
+  is completed **before** Phase 4/5 even though its task numbers (T073+) are higher.
+- **User Story 2 (Phase 4)**: Depends only on Foundational (+ Phase 3.5 per the ordering above);
+  reuses US1's data-access tool
   infrastructure and Blazor shell but does not require US1's phase to be marked "done," only its
   underlying Foundational pieces.
 - **User Story 3 (Phase 5)**: Depends only on Foundational; T061/T063 additionally build on the

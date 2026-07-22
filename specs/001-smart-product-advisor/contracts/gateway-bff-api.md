@@ -16,6 +16,22 @@ clarification/recommendation/comparison body defined in `advisor-conversation-ap
 Gateway passes it through rather than reshaping it, to avoid two sources of truth for the
 response contract).
 
+## POST /api/chat/messages/stream
+
+Streaming sibling of `POST /api/chat/messages` (research.md §11): same request shape
+(`sessionId`/`text`), but proxies the Advisor's `POST /api/conversations/{sessionId}/messages/stream`
+SSE response back to the caller almost verbatim, with one addition — the resolved `sessionId`
+is merged into the final `result` event's JSON payload (the same composition the non-streaming
+endpoint already does), so a client never has to make a separate call to learn which session it
+ended up in.
+
+**Request**: identical to `POST /api/chat/messages`.
+
+**Response 200** (`Content-Type: text/event-stream`): the same `token`/`result` event sequence
+defined in `advisor-conversation-api.md`, with `sessionId` added into the `result` event's data.
+If `sessionId` was null, the Gateway creates the session first (as it does today), then opens
+the stream for the message.
+
 ## GET /api/chat/{sessionId}
 
 Pass-through of `GET /api/conversations/{sessionId}` on the Advisor service, for page reload /
@@ -40,3 +56,8 @@ partial success, not total failure.
   is simulated as down, not a `5xx`.
 - `POST /api/chat/messages` with `sessionId: null` results in exactly one new session being
   created (no duplicate session creation on retry within the same logical request).
+- `POST /api/chat/messages/stream` with `sessionId: null` creates exactly one session (same
+  guarantee as the non-streaming endpoint) and the created `sessionId` appears in the `result`
+  event.
+- The Gateway's streamed `result` event, once `sessionId` is stripped back out, is
+  byte-identical to what `POST /api/chat/messages` returns for the same underlying turn.

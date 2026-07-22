@@ -101,6 +101,11 @@ request.
 | `PendingClarification` | ClarificationQuestion? | Set when essential info is missing; cleared once answered |
 | `LastRecommendation` | Recommendation? | The most recent recommendation set produced, for follow-up questions (US3) |
 
+Streaming (research.md §11) is a transport/presentation concern only — a `ConversationMessage`
+always stores the complete, final assistant text once a turn ends, never a partial fragment.
+Whether the API delivered that text as one JSON response or as a sequence of SSE `token` events
+has no bearing on what gets persisted.
+
 **State transitions**: `Collecting` (gathering requirement, may hold a `PendingClarification`)
 → `Recommending` (requirement has at minimum Category + Budget, deterministic scoring runs) →
 `Comparing` (user asked to compare specific/candidate products) → back to `Collecting` if the

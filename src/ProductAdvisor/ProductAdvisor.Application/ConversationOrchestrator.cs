@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.Extensions.AI;
 using ProductAdvisor.Domain;
 
@@ -41,6 +43,52 @@ public sealed class ConversationOrchestrator(
         var narration = response.Text;
         session.AddMessage(new ConversationMessage("assistant", narration, DateTimeOffset.UtcNow));
 
+        return FinalizeTurn(session, narration);
+    }
+
+    /// <summary>
+    /// Streaming sibling of <see cref="ProcessMessageAsync"/> (FR-015/research.md §11) — same
+    /// tool-calling/grounding semantics via <see cref="IChatClient.GetStreamingResponseAsync"/>
+    /// (the same <see cref="ProductAdvisor.Domain"/>-owning tool handlers still run mid-stream),
+    /// but the narration is yielded token-by-token as it arrives, followed by exactly one final
+    /// <see cref="StreamingTurnUpdate"/> carrying the same <see cref="AdvisorTurnResult"/> the
+    /// non-streaming path would have returned for this turn.
+    /// </summary>
+    public async IAsyncEnumerable<StreamingTurnUpdate> ProcessMessageStreamAsync(
+        ConversationSession session,
+        string userMessage,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            throw new ArgumentException("Message text is required.", nameof(userMessage));
+        }
+
+        session.AddMessage(new ConversationMessage("user", userMessage, DateTimeOffset.UtcNow));
+
+        var chatOptions = new ChatOptions { Tools = [.. toolCatalog.GetTools()] };
+        var narrationBuilder = new StringBuilder();
+
+        await foreach (var update in chatClient.GetStreamingResponseAsync(BuildChatHistory(session), chatOptions, cancellationToken))
+        {
+            if (string.IsNullOrEmpty(update.Text))
+            {
+                continue;
+            }
+
+            narrationBuilder.Append(update.Text);
+            yield return StreamingTurnUpdate.ForToken(update.Text);
+        }
+
+        var narration = narrationBuilder.ToString();
+        session.AddMessage(new ConversationMessage("assistant", narration, DateTimeOffset.UtcNow));
+
+        yield return StreamingTurnUpdate.ForResult(FinalizeTurn(session, narration));
+    }
+
+    private AdvisorTurnResult FinalizeTurn(ConversationSession session, string narration)
+    {
         if (resultCapture.Recommendation is not null)
         {
             session.UpdateRequirement(resultCapture.RequirementUsed!);

@@ -1,3 +1,4 @@
+using Polly;
 using WebApp.Blazor.Components;
 using WebApp.Blazor.Services;
 
@@ -9,7 +10,13 @@ builder.AddServiceDefaults();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddHttpClient<GatewayApiClient>(client => client.BaseAddress = new Uri("http://gateway-api"));
+#pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
+builder.Services.AddHttpClient<GatewayApiClient>(client => client.BaseAddress = new Uri("http://gateway-api"))
+    // See the matching comment in Gateway.Api/Program.cs — the SSE streaming call needs a
+    // longer, retry-free timeout instead of the standard resilience handler's short-request assumptions.
+    .RemoveAllResilienceHandlers()
+    .AddResilienceHandler("gateway-streaming", pipeline => pipeline.AddTimeout(TimeSpan.FromMinutes(5)));
+#pragma warning restore EXTEXP0001
 
 var app = builder.Build();
 

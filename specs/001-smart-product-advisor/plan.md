@@ -29,6 +29,11 @@ output; it is never the source of a rating, a delta, a match, or a score. This m
 — a specific, unit-tested tool implementation — that can produce any given fact or number, and
 it is never the LLM.
 
+The advisor's replies stream to the user progressively over SSE as the LLM generates them
+(FR-015), and are rendered with real structure — Markdown for the LLM's narration, actual
+HTML lists/tables (built by the UI, not the LLM) for the structured facts (FR-016/FR-017) —
+detailed in research.md §11–§12.
+
 ## Technical Context
 
 **Language/Version**: C# 13 / .NET 10, ASP.NET Core 10
@@ -41,7 +46,11 @@ circuit-breaking on all outbound HTTP; YARP (`Yarp.ReverseProxy`) for the Gatewa
 Web App (Interactive Server render mode) for the UI; .NET Aspire (`Aspire.Hosting`,
 `Aspire.Hosting.PostgreSQL`) for local orchestration/service discovery/dashboard;
 OpenTelemetry (`OpenTelemetry.Extensions.Hosting`, OTLP exporter) + `Microsoft.Extensions.Logging`
-structured logging for tracing.
+structured logging for tracing; ASP.NET Core's built-in Server-Sent Events support (or a manual
+`text/event-stream` writer, confirmed at implementation time) for streaming advisor replies
+(research.md §11); `Markdig` + an HTML allow-list sanitizer for rendering the LLM's narration
+text safely (research.md §12) — structured facts are rendered by the UI's own Razor markup, not
+through Markdown at all.
 
 **Storage**: PostgreSQL. One managed Postgres instance for the free/demo environment (Neon),
 one dedicated schema and one least-privileged database role per service (`catalog`, `pricing`);
@@ -68,7 +77,9 @@ web frontend — multi-project .NET solution, one Docker image per deployable se
 free-tier hosting). Advisor conversation turns that only call Catalog/Pricing tools (no LLM
 clarification loop beyond one call): p95 < 3 s end-to-end, dominated by the LLM call latency,
 which is out of this system's direct control. Independent Catalog/Pricing lookups for the same
-candidate set MUST be issued concurrently (`Task.WhenAll`) rather than sequentially.
+candidate set MUST be issued concurrently (`Task.WhenAll`) rather than sequentially. Streamed
+turns (SC-008): first narration token visible to the user within 3 s even when the full answer
+takes longer.
 
 **Constraints**: Must run within free/low-cost tiers: Render free web services (cold starts
 after idle acceptable for a demo), Neon free-tier Postgres (limited connections — use Neon's
@@ -87,10 +98,10 @@ production e-commerce traffic volumes.
 | Principle | Design response | Status |
 |---|---|---|
 | I. Code Quality & Maintainability | Every service is split into Domain / Application / Infrastructure / API projects with only interface-level coupling; config/secrets live in environment variables and .NET user-secrets/Aspire parameters, never in source; `dotnet format` + analyzers + `dotnet test` run in CI as a merge gate. | PASS |
-| II. Reliable & Grounded Behavior | Product facts/prices/availability, and every derived number (score, rating, delta), are produced only inside deterministic MCP tool implementations that call Catalog/Pricing; the LLM only invokes tools and narrates their literal output, so it structurally cannot fabricate or calculate a fact, a rating, or a delta — the Advisor's own conversation-orchestration code never computes one either. | PASS |
+| II. Reliable & Grounded Behavior | Product facts/prices/availability, and every derived number (score, rating, delta), are produced only inside deterministic MCP tool implementations that call Catalog/Pricing; the LLM only invokes tools and narrates their literal output, so it structurally cannot fabricate or calculate a fact, a rating, or a delta — the Advisor's own conversation-orchestration code never computes one either. Streaming (research.md §11) only staggers delivery of that same narration text; structured facts are always sent complete in the final `result` event, never as a partial/guessed value mid-stream. | PASS |
 | III. Testing Standards | xUnit unit tests for every domain rule (scoring, comparison delta/rating math) exercised directly and through its owning tool, contract tests per service API and per MCP tool, integration tests with Testcontainers, and cross-service recommendation/comparison scenarios in a dedicated CI stage; all required green before merge. | PASS |
 | IV. Consistent UX | Comparison criteria and values are computed once, inside the `compare_products` tool, from the shared set of category attributes and applied identically to every product in the call — the LLM cannot selectively omit or reorder them because it never computes them; `ConversationSession` aggregate is the single place budget/currency/units/requirements are held so they cannot silently drift across turns. | PASS |
-| V. Performance & Resilience | All outbound HTTP (service-to-service and to the LLM provider) goes through `Microsoft.Extensions.Http.Resilience` standard handlers (timeout, bounded retry+backoff, circuit breaker); independent Catalog/Pricing calls run concurrently; partial failures (e.g., Pricing down) degrade to an honest partial answer instead of failing the whole turn. | PASS |
+| V. Performance & Resilience | All outbound HTTP (service-to-service and to the LLM provider) goes through `Microsoft.Extensions.Http.Resilience` standard handlers (timeout, bounded retry+backoff, circuit breaker); independent Catalog/Pricing calls run concurrently; partial failures (e.g., Pricing down) degrade to an honest partial answer instead of failing the whole turn. SSE streaming (research.md §11) improves perceived responsiveness and still guarantees a complete final response — falling back to a buffered call if the provider/connection can't sustain a stream — rather than leaving the user with a stuck or truncated turn. | PASS |
 | VI. Observability & Safe Evolution | OpenTelemetry tracing + structured logs across Gateway, MCP tool calls, services, EF Core, and LLM calls, correlated via W3C `traceparent` propagated automatically by ASP.NET Core/HttpClient instrumentation (Aspire `ServiceDefaults`); prompts/tool schemas/recommendation rules are plain version-controlled C#/config, not runtime-mutable state. | PASS |
 
 No unjustified violations were identified; the **Complexity Tracking** table below is
@@ -142,14 +153,18 @@ src/
 │   │                                          # No product-data computation lives here (semantic UI, not a rules engine).
 │   ├── ProductAdvisor.Infrastructure/         # MCP tool handlers (search/details/price-availability/recommend/compare),
 │   │                                          # Catalog/Pricing HTTP clients, LLM client, EF Core (conversation store)
-│   └── ProductAdvisor.Api/                    # MCP server endpoint (/mcp, all tools) + conversation HTTP API (+ Dockerfile)
+│   └── ProductAdvisor.Api/                    # MCP server endpoint (/mcp, all tools) + conversation HTTP API,
+│                                                # incl. the SSE .../messages/stream endpoint (+ Dockerfile)
 │
 ├── Gateway/
-│   └── Gateway.Api/                          # ASP.NET Core BFF: YARP routes + chat/composition endpoints (+ Dockerfile)
+│   └── Gateway.Api/                          # ASP.NET Core BFF: YARP routes + chat/composition endpoints,
+│                                                # incl. the SSE .../api/chat/messages/stream endpoint (+ Dockerfile)
 │
 └── WebApp/
-    └── WebApp.Blazor/                        # Blazor Web App (Interactive Server): chat, recommendations,
-                                                # comparison view, price/availability display (+ Dockerfile)
+    └── WebApp.Blazor/                        # Blazor Web App (Interactive Server): chat (consumes the Gateway's
+                                                # SSE stream server-side), recommendations, comparison view,
+                                                # price/availability display — Markdig-rendered narration +
+                                                # Razor-rendered structured facts (+ Dockerfile)
 
 tests/
 ├── ProductCatalog.Domain.Tests/

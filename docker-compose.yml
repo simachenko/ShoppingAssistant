@@ -22,6 +22,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__catalogdb: "Host=postgres;Database=catalogdb;Username=catalog_role;Password=catalog_dev_password"
+      SeedDemoData: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,6 +36,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__pricingdb: "Host=postgres;Database=pricingdb;Username=pricing_role;Password=pricing_dev_password"
+      SeedDemoData: "true"
     depends_on:
       postgres:
         condition: service_healthy

@@ -64,6 +64,7 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - What happens if product data (prices, availability, specifications) is temporarily unavailable? The advisor MUST inform the user that it cannot complete the request right now rather than fabricating an answer.
 - What happens when the user changes a previously stated constraint mid-conversation (e.g., raises the budget)? The advisor MUST apply the updated constraint going forward and treat earlier recommendations as superseded.
 - What happens when the user asks about a product category the retailer does not carry at all? The advisor MUST state that it isn't available rather than comparing or recommending unrelated items.
+- What happens if the connection to the advisor is interrupted partway through a response, or the underlying language model doesn't support progressive delivery? The user MUST still end up with the complete response (falling back to delivering it all at once) rather than being left with a truncated, stuck, or silently failed answer.
 
 ## Requirements *(mandatory)*
 
@@ -83,6 +84,9 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **FR-012**: The advisor MUST reflect current availability/stock status for any product it recommends or includes in a comparison.
 - **FR-013**: Users MUST be able to ask follow-up questions about a specific recommended or compared product's characteristics, price, or availability.
 - **FR-014**: The advisor MUST inform the user when product data needed to answer a request is temporarily unavailable, rather than responding as though the request succeeded.
+- **FR-015**: The advisor's response MUST be delivered to the user progressively as it is generated, rather than only after the entire response is complete, so the user sees the answer forming instead of facing a blank wait on longer responses.
+- **FR-016**: The advisor's explanatory text MUST use structured formatting (e.g., headings, emphasis, bullet lists) rather than a single dense paragraph, so key facts are easy to scan.
+- **FR-017**: Recommendation and comparison data (specifications, matched requirements, trade-offs, comparison criteria) MUST be presented as structured lists/tables rather than only as prose, so the user can visually distinguish and compare product characteristics at a glance.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -103,6 +107,8 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **SC-005**: 100% of requests missing essential information (category or budget) receive a clarifying question before any recommendation is given.
 - **SC-006**: 100% of responses affected by unavailable or unverifiable data explicitly state that limitation rather than silently omitting it.
 - **SC-007**: For a fully specified request, a user can go from initial request to a final recommendation — including any single clarification round — within one conversational exchange.
+- **SC-008**: For responses that take more than a couple of seconds to fully generate, the user sees the first part of the advisor's answer begin appearing within 3 seconds, rather than waiting for the entire response before seeing anything.
+- **SC-009**: 100% of recommendation and comparison responses present specifications, matched requirements, trade-offs, and comparison criteria as visually distinct list/table elements rather than as a single block of prose text.
 
 ## Assumptions
 
@@ -112,3 +118,5 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - When no product fits the stated constraints, the advisor discloses the gap and may suggest the closest alternatives only if explicitly labeled as not fully matching; it will not silently exceed a stated budget.
 - A conversation may span multiple turns; the advisor retains previously stated constraints (budget, category, required features) until the user changes them.
 - Currency and units follow whatever the user specifies (e.g., UAH); no currency conversion is assumed unless the user requests it.
+- Progressive delivery (FR-015) applies to the advisor's own explanatory text; the structured facts within a response (prices, specifications, matched requirements, comparison values) are only ever shown once fully known and verified — a fact is never displayed as a partial/guessed value while streaming, only the narration around it appears incrementally.
+- Rich formatting (FR-016/FR-017) is a presentation concern: it changes how already-grounded data and text are displayed, not what data is shown. It never introduces a fact or number that didn't already come from an approved source.

@@ -39,4 +39,5 @@
   <Project Path="../tests/ProductCatalog.Application.Tests/ProductCatalog.Application.Tests.csproj" />
   <Project Path="../tests/ProductCatalog.Domain.Tests/ProductCatalog.Domain.Tests.csproj" />
   <Project Path="../tests/TestSupport/TestSupport.csproj" />
+  <Project Path="../tests/WebApp.Blazor.Tests/WebApp.Blazor.Tests.csproj" />
 </Solution>

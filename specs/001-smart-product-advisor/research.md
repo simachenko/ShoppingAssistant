@@ -214,3 +214,98 @@ externalized-configuration requirement.
 
 **Alternatives considered**: Hard dependency on one vendor SDK — rejected; would violate both
 the explicit swappability requirement and Principle I.
+
+## 11. Streaming responses over SSE (FR-015/SC-008)
+
+**Decision**: Add a streaming sibling to the existing conversation endpoint —
+`POST /api/conversations/{sessionId}/messages/stream` on `ProductAdvisor.Api`, mirrored as
+`POST /api/chat/messages/stream` on `Gateway.Api` — that responds with `text/event-stream`
+instead of a single JSON body. The **non-streaming endpoints from §1 are kept as-is**; streaming
+is additive, not a replacement, so existing contract tests and any non-streaming consumer keep
+working unchanged.
+
+Internally, the orchestrator calls `IChatClient.GetStreamingResponseAsync(messages, options, ct)`
+instead of `GetResponseAsync` — `FunctionInvokingChatClient` (from `.UseFunctionInvocation()`,
+already wired) supports streaming transparently: it still intercepts a function-call chunk,
+invokes the real tool handler (still fully deterministic, still captured via
+`IToolResultCapture` exactly as in §1), and resumes streaming the model's continuation. The SSE
+response carries two event kinds:
+
+- `event: token` (zero or more) — `data: {"delta": "..."}`, an incremental slice of the LLM's
+  narration text, in order.
+- `event: result` (exactly one, last) — `data: <the same JSON shape the non-streaming endpoint
+  returns>` (contracts/advisor-conversation-api.md's `ConversationTurnResponse`): the full
+  narration plus, if a tool produced one, the structured `items`/`criteria`/`rows` data. This
+  keeps exactly one response contract regardless of whether a client streamed or not.
+
+Server-side SSE writing uses ASP.NET Core's built-in SSE support for the installed package
+version (`TypedResults.ServerSentEvents`/equivalent if present in this SDK's ASP.NET Core
+release; otherwise a manual `text/event-stream` writer — confirmed at implementation time, both
+produce the identical wire format above so callers are unaffected either way).
+
+On the client side, Blazor's Interactive Server render mode already keeps a live connection to
+the browser (SignalR) — so "the frontend streams" means the **Blazor component's own C# code**
+opens the SSE request to the Gateway (via a server-side `HttpClient`, reading the response body
+incrementally with .NET's built-in SSE parser) and updates its bound state per `token` event,
+calling the normal Blazor re-render pipeline. No separate browser-side `EventSource` is needed
+or used; the browser only ever talks to the Blazor circuit it already has open.
+
+**Fallback (per spec's new edge case)**: if the provider doesn't support streaming, or the SSE
+connection drops mid-turn, the Advisor still guarantees a final `result` event carrying the
+complete response (falling back to a buffered call internally if needed); if the client's own
+connection to the Gateway drops, the Blazor page falls back to calling the non-streaming
+endpoint so the user always ends up with the complete answer, never a permanently truncated one
+(constitution Principle V — graceful degradation, not a stuck UI).
+
+**Rationale**: Keeps the "everything factual comes from a tool, captured once" guarantee from §1
+completely intact — streaming only changes how the LLM's *narration* is delivered, never how or
+when a fact is produced. A single additive endpoint (rather than replacing the existing one)
+avoids destabilizing the already-verified US1 conversation API and its tests.
+
+**Alternatives considered**: (a) WebSockets/SignalR hub end-to-end from Advisor through Gateway
+to the browser — rejected as heavier than needed; SSE is a plain HTTP response, simpler to proxy
+through a YARP-fronted Gateway, and we don't need bidirectional push (the client only ever sends
+one message per turn). (b) Browser-side `EventSource` connecting directly to the Gateway —
+rejected for a Blazor Server app specifically: it would mean maintaining UI state in JavaScript
+and shipping it back into the Blazor circuit via JS interop, duplicating state the circuit
+already owns server-side; consuming the stream server-side in the component is simpler and
+keeps all state in one place. (c) Re-parsing/patching only the newly-arrived markdown delta —
+rejected in favor of full-text reparse per token (see §12) for correctness.
+
+## 12. Rich content rendering: Markdown for narration, real markup for facts (FR-016/FR-017/SC-009)
+
+**Decision**: Two different rendering paths for two different kinds of content, kept
+deliberately separate:
+
+- The LLM's own narration (`message`/`question` text) is treated as Markdown and rendered via
+  **Markdig** (`Markdown.ToHtml(text, pipeline)`) into HTML, **sanitized** before display (a
+  restrictive Markdig pipeline with the raw-HTML-passthrough extension disabled, plus running
+  the output through an HTML allow-list sanitizer) since LLM-generated text is not fully trusted
+  content and Blazor's `MarkupString` bypasses Razor's normal HTML-encoding — skipping
+  sanitization here would be a real stored/reflected-XSS-style risk.
+- The **structured facts** (specifications, matched requirements, trade-offs, comparison
+  criteria/rows/ratings/deltas) are rendered by the Blazor components' own Razor markup — real
+  `<ul>/<li>` and `<table>` elements built directly from the typed response DTOs — **never** by
+  asking the LLM to format them as Markdown itself. Letting the LLM format the facts would
+  reopen exactly the risk the rest of this architecture exists to close (research.md §1): a
+  "formatting" pass is still a pass where the LLM could alter a number. The rendered Markdown
+  narration is supplementary commentary that sits alongside the code-rendered facts, never a
+  substitute for them.
+- While streaming (§11), the UI re-parses the **full accumulated narration text** through
+  Markdig on every `token` event rather than incrementally patching previously-rendered HTML —
+  correct-by-reconstruction (an unclosed `**bold**` mid-stream never renders as broken markup for
+  more than the current token) and cheap enough at chat-message length that re-parsing per token
+  has no perceptible cost.
+
+**Rationale**: Directly satisfies FR-016/FR-017 while preserving constitution Principle II
+(grounding) — rich formatting is purely presentational and can never become a second place a
+fact could be fabricated or altered, because facts never pass through the LLM-formatted path at
+all.
+
+**Alternatives considered**: (a) Ask the LLM to also emit the comparison table/spec list as
+Markdown and render that directly — rejected; would make the LLM the source of a "fact's"
+presentation, one step from being the source of the fact itself, and harder to unit-test for
+determinism than our own Razor markup. (b) A client-side JS Markdown library (e.g., `marked.js`)
+instead of Markdig — rejected to keep the Blazor Server app's logic server-side and in C#,
+consistent with not shipping business/formatting logic to the browser; also avoids a second
+sanitization surface (JS-side) to maintain.

@@ -1,7 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using PricingAvailability.Application;
 using PricingAvailability.Application.Abstractions;
 using PricingAvailability.Infrastructure;
 using PricingAvailability.Infrastructure.Repositories;
+using PricingAvailability.Infrastructure.SeedData;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +17,20 @@ var app = builder.Build();
 
 app.UseCorrelationId();
 app.MapDefaultEndpoints();
+
+// Demo/local-dev convenience: apply migrations and seed a fixed dataset if empty. Guarded by
+// config so this never runs unintentionally against a real environment (e.g., Render/Neon).
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<PricingDbContext>();
+    await db.Database.MigrateAsync();
+
+    if (app.Configuration.GetValue<bool>("SeedDemoData") && !await db.Offers.AnyAsync())
+    {
+        db.Offers.AddRange(DemoSeedData.Offers);
+        await db.SaveChangesAsync();
+    }
+}
 
 // GET /api/pricing/offers/{productId} — single lookup (contracts/pricing-api.md)
 app.MapGet("/api/pricing/offers/{productId:guid}", async (Guid productId, PricingService service, CancellationToken ct) =>

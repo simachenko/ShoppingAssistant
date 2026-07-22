@@ -75,6 +75,45 @@ public class ScoringPolicyTests
     }
 
     [Fact]
+    public void A_shorter_free_form_requirement_matches_a_longer_more_specific_spec_key()
+    {
+        // Regression: an LLM extracting "camera" from "a good camera" must still match the
+        // catalog's "camera_mp" spec key, not just the exact reverse case.
+        var requirement = new UserRequirement
+        {
+            Category = "smartphones",
+            Budget = new Money(15000m, "UAH"),
+            RequiredFeatures = ["camera"],
+        };
+        var withCamera = Candidate("Camera Phone", 14000m, specs: ("camera_mp", "50", "MP"));
+
+        var result = ScoringPolicy.Score(requirement, [withCamera]);
+
+        Assert.Contains("camera", result.Items[0].MatchedRequirements);
+        Assert.DoesNotContain(result.Items[0].TradeOffs, t => t.Contains("Does not clearly satisfy"));
+    }
+
+    [Fact]
+    public void A_multi_word_free_form_requirement_still_matches_via_token_overlap()
+    {
+        // Regression: the LLM phrases the same requirement differently across calls
+        // ("camera", "good camera", "camera quality") — all must match "camera_mp" via a
+        // shared token, not just an exact substring relationship.
+        var requirement = new UserRequirement
+        {
+            Category = "smartphones",
+            Budget = new Money(15000m, "UAH"),
+            RequiredFeatures = ["good camera"],
+        };
+        var withCamera = Candidate("Camera Phone", 14000m, specs: ("camera_mp", "50", "MP"));
+
+        var result = ScoringPolicy.Score(requirement, [withCamera]);
+
+        Assert.Contains("good camera", result.Items[0].MatchedRequirements);
+        Assert.DoesNotContain(result.Items[0].TradeOffs, t => t.Contains("Does not clearly satisfy"));
+    }
+
+    [Fact]
     public void Score_ranks_candidates_matching_more_required_features_higher()
     {
         var requirement = new UserRequirement

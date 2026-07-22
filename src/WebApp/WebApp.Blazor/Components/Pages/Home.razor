@@ -1,6 +1,7 @@
 @page "/"
 @rendermode InteractiveServer
 @using WebApp.Blazor.Models
+@using WebApp.Blazor.Rendering
 @using WebApp.Blazor.Services
 @inject GatewayApiClient GatewayApi
 
@@ -18,14 +19,29 @@
     {
         <div class="chat-message chat-message-@entry.Role">
             <strong>@(entry.Role == "user" ? "You" : "Advisor")</strong>
-            <p>@entry.Text</p>
+            @if (entry.Role == "user")
+            {
+                <p>@entry.Text</p>
+            }
+            else
+            {
+                @* Narration only — the LLM's own text, safe to render as Markdown (FR-016). *@
+                <div>@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(entry.Text))</div>
+            }
+        </div>
+    }
+    @if (_isStreamingAssistantTurn)
+    {
+        <div class="chat-message chat-message-assistant">
+            <strong>Advisor</strong>
+            <div>@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(_streamingNarration))</div>
         </div>
     }
 </div>
 
 @if (_lastTurn is { Type: "clarification" })
 {
-    <div class="alert alert-info">@_lastTurn.Question</div>
+    <div class="alert alert-info">@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(_lastTurn.Question ?? ""))</div>
 }
 else if (_errorMessage is not null)
 {
@@ -63,8 +79,20 @@ else if (_lastTurn is { Type: "recommendation" })
                             <em>Availability could not be verified</em>
                         }
                     </p>
-                    <p><strong>Why it matches:</strong> @string.Join("; ", item.MatchedRequirements)</p>
-                    <p><strong>Trade-offs:</strong> @string.Join("; ", item.TradeOffs)</p>
+                    <p><strong>Why it matches:</strong></p>
+                    <ul>
+                        @foreach (var reason in item.MatchedRequirements)
+                        {
+                            <li>@reason</li>
+                        }
+                    </ul>
+                    <p><strong>Trade-offs:</strong></p>
+                    <ul>
+                        @foreach (var tradeOff in item.TradeOffs)
+                        {
+                            <li>@tradeOff</li>
+                        }
+                    </ul>
                 </div>
             }
         </div>
@@ -87,6 +115,8 @@ else if (_lastTurn is { Type: "recommendation" })
     private readonly List<(string Role, string Text)> _history = [];
     private string _draftMessage = "";
     private bool _isSending;
+    private bool _isStreamingAssistantTurn;
+    private string _streamingNarration = "";
     private Guid? _sessionId;
     private ChatTurnDto? _lastTurn;
     private string? _errorMessage;
@@ -114,17 +144,8 @@ else if (_lastTurn is { Type: "recommendation" })
 
         try
         {
-            var turn = await GatewayApi.SendMessageAsync(_sessionId, message, CancellationToken.None);
-            _sessionId = turn.SessionId;
-            _lastTurn = turn;
-
-            var narration = turn.Type switch
-            {
-                "clarification" => turn.Question ?? "",
-                "recommendation" => turn.Message ?? "",
-                _ => "",
-            };
-            _history.Add(("assistant", narration));
+            var turn = await TryStreamingAsync(message) ?? await GatewayApi.SendMessageAsync(_sessionId, message, CancellationToken.None);
+            ApplyTurnResult(turn);
         }
         catch (Exception)
         {
@@ -134,7 +155,58 @@ else if (_lastTurn is { Type: "recommendation" })
         }
         finally
         {
+            _isStreamingAssistantTurn = false;
+            _streamingNarration = "";
             _isSending = false;
         }
+    }
+
+    /// <summary>
+    /// Streams the turn's narration progressively (FR-015). Returns null — signalling the caller
+    /// to fall back to the non-streaming endpoint — if the connection ends without ever producing
+    /// a result (contracts/gateway-bff-api.md: "connection closed without a result event" MUST be
+    /// treated as a failure, never a silently-accepted empty answer).
+    /// </summary>
+    private async Task<ChatTurnDto?> TryStreamingAsync(string message)
+    {
+        try
+        {
+            _isStreamingAssistantTurn = true;
+            _streamingNarration = "";
+            ChatTurnDto? result = null;
+
+            await foreach (var update in GatewayApi.StreamMessageAsync(_sessionId, message, CancellationToken.None))
+            {
+                if (update.Delta is not null)
+                {
+                    _streamingNarration += update.Delta;
+                    StateHasChanged();
+                }
+                else if (update.Result is not null)
+                {
+                    result = update.Result;
+                }
+            }
+
+            return result;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private void ApplyTurnResult(ChatTurnDto turn)
+    {
+        _sessionId = turn.SessionId;
+        _lastTurn = turn;
+
+        var narration = turn.Type switch
+        {
+            "clarification" => turn.Question ?? "",
+            "recommendation" => turn.Message ?? "",
+            _ => "",
+        };
+        _history.Add(("assistant", narration));
     }
 }

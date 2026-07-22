@@ -94,14 +94,30 @@ public static class ScoringPolicy
         };
     }
 
+    private static readonly char[] TokenSeparators = [' ', '_', '-', '.', ',', '!', '?'];
+
     /// <summary>
-    /// Deterministic substring match of a free-form requirement/preference phrase against the
-    /// candidate's specification keys/values — no LLM involved in deciding a match.
+    /// Deterministic word-token-overlap match of a free-form requirement/preference phrase
+    /// against a candidate's specification keys/values — no LLM involved in deciding a match.
+    /// Token overlap (rather than plain substring containment) is what makes this robust to the
+    /// LLM phrasing the same requirement differently across calls (e.g. "camera",
+    /// "good camera", and "camera quality" must all match the spec key "camera_mp"); a residual
+    /// substring check on the value covers numeric/exact-phrase cases token-splitting would miss.
     /// </summary>
-    private static bool MatchesSpec(ProductCandidate candidate, string requirementText) =>
-        candidate.Specifications.Any(s =>
-            requirementText.Contains(s.Key, StringComparison.OrdinalIgnoreCase) ||
+    private static bool MatchesSpec(ProductCandidate candidate, string requirementText)
+    {
+        var requirementTokens = Tokenize(requirementText);
+
+        return candidate.Specifications.Any(s =>
+            Tokenize(s.Key).Overlaps(requirementTokens) ||
+            Tokenize(s.Value).Overlaps(requirementTokens) ||
             requirementText.Contains(s.Value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static HashSet<string> Tokenize(string text) =>
+        text.Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(t => t.ToLowerInvariant())
+            .ToHashSet();
 
     /// <summary>
     /// Every candidate gets at least one trade-off (FR-009): unmatched requirements first, then

@@ -22,3 +22,11 @@ public sealed record ChatTurnDto(
     string? Question,
     IReadOnlyList<RecommendedItemDto>? Items,
     string? UnmetConstraintExplanation);
+
+/// <summary>
+/// One item from the Gateway's streaming chat endpoint (FR-015/research.md §11) — either a
+/// narration-text delta (<see cref="Delta"/> set) or, exactly once and always last, the same
+/// <see cref="ChatTurnDto"/> the non-streaming endpoint would have returned for this turn
+/// (<see cref="Result"/> set).
+/// </summary>
+public sealed record ChatStreamEvent(string? Delta, ChatTurnDto? Result);

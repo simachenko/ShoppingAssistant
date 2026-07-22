@@ -95,6 +95,43 @@ the degraded state) if the LLM provider and/or both upstream services are unreac
 resilience policies are exhausted — the Advisor still MUST respond, per constitution Principle
 V, rather than the caller seeing a bare timeout.
 
+## POST /api/conversations/{sessionId}/messages/stream
+
+The streaming sibling of the endpoint above (FR-015/research.md §11) — same request body, same
+turn semantics, same underlying tool calls — but the response is `text/event-stream` instead of
+one JSON body, so the UI can show the advisor's narration as it's generated.
+
+**Request**: identical to `POST /api/conversations/{sessionId}/messages`.
+
+**Response 200** (`Content-Type: text/event-stream`) — a sequence of SSE events:
+
+```text
+event: token
+data: {"delta": "I found a "}
+
+event: token
+data: {"delta": "smartphone that fits..."}
+
+event: result
+data: { ...exactly the same JSON shape POST .../messages returns for this turn... }
+```
+
+- `token` events (zero or more, in order): `delta` is the next slice of the LLM's narration
+  text only — never a structured fact. Concatenating every `delta` in order reproduces the
+  final `message`/`question` text.
+- `result` event (exactly one, always last): the complete `ConversationTurnResponse` — same
+  contract as the non-streaming endpoint, so a client can ignore `token` events entirely and
+  still get the full answer from `result` alone.
+- If the stream is interrupted or the provider can't stream, the connection still ends with a
+  `result` event carrying the complete response (constitution Principle V) — a client MUST
+  treat "connection closed without a `result` event" as a failure and fall back to
+  `POST /api/conversations/{sessionId}/messages` for that turn.
+
+**Errors**: same status codes as the non-streaming endpoint for failures that occur before the
+stream starts (`404`/`400`); once the stream has started, failures are communicated by ending
+the stream without a `result` event rather than an HTTP error status (the headers are already
+committed).
+
 ## GET /api/conversations/{sessionId}
 
 **Response 200**: full transcript + `currentRequirement` snapshot (category, budget, required
@@ -117,3 +154,10 @@ that constraints persisted correctly across turns (FR-011).
   are asserted to come from the underlying tool response used in the test fixture, independent
   of whatever `message` text a stubbed LLM returns — proving the API layer never recomputes or
   overrides tool output.
+- For `POST .../messages/stream`: concatenating every `token` event's `delta` equals the
+  `message`/`question` in the final `result` event; the `result` event's structured fields
+  (`items`, `criteria`/`rows`, etc.) are byte-identical to what the non-streaming endpoint
+  returns for the same stubbed tool output — streaming must not change the facts, only their
+  delivery.
+- A stream that's forcibly cut before its `result` event is asserted to be detectable as
+  incomplete by the client (no silent "it just ended normally" false-positive).

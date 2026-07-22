@@ -1,5 +1,8 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.ServerSentEvents;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace Gateway.Api.Clients;
@@ -25,6 +28,30 @@ public sealed class AdvisorApiClient(HttpClient httpClient)
             $"/api/conversations/{sessionId}/messages", new { text }, cancellationToken);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+    }
+
+    /// <summary>
+    /// Streaming sibling of <see cref="SendMessageAsync"/> (contracts/gateway-bff-api.md) —
+    /// relays the Advisor's <c>token</c>/<c>result</c> SSE events almost verbatim; the caller
+    /// merges its own <c>sessionId</c> into the <c>result</c> event.
+    /// </summary>
+    public async IAsyncEnumerable<(string EventType, string Data)> StreamMessageAsync(
+        Guid sessionId, string text, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/conversations/{sessionId}/messages/stream")
+        {
+            Content = JsonContent.Create(new { text }),
+        };
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await foreach (var item in SseParser.Create(stream).EnumerateAsync(cancellationToken))
+        {
+            yield return (item.EventType, item.Data);
+        }
     }
 
     public async Task<JsonElement?> GetSnapshotAsync(Guid sessionId, CancellationToken cancellationToken)

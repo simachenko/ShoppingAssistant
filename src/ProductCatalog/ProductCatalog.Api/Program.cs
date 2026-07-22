@@ -1,7 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using ProductCatalog.Application;
 using ProductCatalog.Application.Abstractions;
 using ProductCatalog.Infrastructure;
 using ProductCatalog.Infrastructure.Repositories;
+using ProductCatalog.Infrastructure.SeedData;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,9 +18,26 @@ var app = builder.Build();
 app.UseCorrelationId();
 app.MapDefaultEndpoints();
 
+// Demo/local-dev convenience: apply migrations and seed a fixed dataset if empty. Guarded by
+// config so this never runs unintentionally against a real environment (e.g., Render/Neon).
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+    await db.Database.MigrateAsync();
+
+    if (app.Configuration.GetValue<bool>("SeedDemoData") && !await db.Products.AnyAsync())
+    {
+        db.Brands.AddRange(DemoSeedData.Brands);
+        db.Categories.AddRange(DemoSeedData.Categories);
+        db.Products.AddRange(DemoSeedData.Products);
+        await db.SaveChangesAsync();
+    }
+}
+
 // GET /api/catalog/products?category=&q=&page=&pageSize= — search (contracts/catalog-api.md)
 app.MapGet("/api/catalog/products", async (
-    string? category, string? q, int page, int pageSize, ProductCatalogService service, CancellationToken ct) =>
+    string? category, string? q, ProductCatalogService service, CancellationToken ct,
+    int page = 1, int pageSize = ProductCatalogService.DefaultPageSize) =>
 {
     page = page <= 0 ? 1 : page;
     pageSize = pageSize <= 0 ? ProductCatalogService.DefaultPageSize : pageSize;
