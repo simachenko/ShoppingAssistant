@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using PricingAvailability.Infrastructure;
 using ProductCatalog.Infrastructure;
 using TestSupport.SeedData;
@@ -11,6 +12,12 @@ namespace EndToEnd.Tests;
 /// quickstart.md) and seeds it with <see cref="CatalogSeedData"/>/<see cref="PricingSeedData"/>
 /// if not already present, so every scenario test can rely on the same fixed products.
 /// Requires the stack to already be running — this fixture does not start it.
+///
+/// The catalog/pricing containers seed themselves on startup with the same fixed GUIDs
+/// (SeedDemoData=true in docker-compose.yml), so this fixture's own AnyAsync-then-insert can
+/// race a concurrently-starting container's identical check-then-insert. The AnyAsync guard
+/// narrows the window but can't close it, so a losing insert here is treated as evidence the
+/// other writer already seeded the data, not a real failure.
 /// </summary>
 public sealed class DockerComposeStackFixture : IAsyncLifetime
 {
@@ -32,7 +39,7 @@ public sealed class DockerComposeStackFixture : IAsyncLifetime
             catalogDb.Brands.AddRange(CatalogSeedData.Brands);
             catalogDb.Categories.AddRange(CatalogSeedData.Categories);
             catalogDb.Products.AddRange(CatalogSeedData.Products);
-            await catalogDb.SaveChangesAsync();
+            await TrySaveChangesAsync(catalogDb);
         }
 
         await using var pricingDb = new PricingDbContext(
@@ -42,9 +49,23 @@ public sealed class DockerComposeStackFixture : IAsyncLifetime
         if (!await pricingDb.Offers.AnyAsync())
         {
             pricingDb.Offers.AddRange(PricingSeedData.Offers);
-            await pricingDb.SaveChangesAsync();
+            await TrySaveChangesAsync(pricingDb);
         }
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
+
+    private static async Task TrySaveChangesAsync(DbContext db)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // Another writer (the catalog/pricing container's own startup seed, or a concurrent
+            // test run) won the race and inserted this fixed-GUID data first — the desired end
+            // state (seeded) is already achieved, so this isn't a real failure.
+        }
+    }
 }
