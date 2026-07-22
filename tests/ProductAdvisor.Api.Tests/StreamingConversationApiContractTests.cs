@@ -39,7 +39,7 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
         Func<AdvisorApiFactory> makeFactory = () => new AdvisorApiFactory(fixture.ConnectionString)
         {
             CatalogResponder = _ => (HttpStatusCode.OK, new CatalogSearchResponse(
-                [new CatalogProductDto(productId, "Galaxy S24", "Samsung", "Smartphones",
+                [new CatalogProductDto(productId, "Galaxy S24", "Samsung", "Smartphones", Guid.NewGuid(),
                     [new CatalogSpecificationDto("camera_mp", "50", "MP")])], 1, 50, 1)),
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
                 [new PricingOfferDto(productId, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], [])),
@@ -127,7 +127,7 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
         var factory = new AdvisorApiFactory(fixture.ConnectionString)
         {
             CatalogResponder = _ => (HttpStatusCode.OK, new CatalogSearchResponse(
-                [new CatalogProductDto(productId, "Galaxy S24", "Samsung", "Smartphones",
+                [new CatalogProductDto(productId, "Galaxy S24", "Samsung", "Smartphones", Guid.NewGuid(),
                     [new CatalogSpecificationDto("camera_mp", "50", "MP")])], 1, 50, 1)),
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
                 [new PricingOfferDto(productId, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], [])),

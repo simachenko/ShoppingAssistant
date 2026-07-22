@@ -18,15 +18,22 @@ public static class ScoringPolicy
 
         var budget = requirement.Budget;
 
-        // Hard exclude: over-budget or unverified/mismatched-currency candidates never appear as
-        // a recommendation (FR-007) — no product disqualified this way is ever presented as a match.
+        // Hard exclude: a *confirmed* over-budget or mismatched-currency candidate never appears
+        // as a recommendation (FR-007) — no product disqualified this way is ever presented as a
+        // match.
         var withinBudget = candidates
             .Where(c => c.PriceVerified && c.Price is not null
                         && c.Price.Currency == budget.Currency
                         && c.Price.Amount <= budget.Amount)
             .ToList();
 
-        if (withinBudget.Count == 0)
+        // Price/availability that could not be verified at all (e.g. a Pricing-service outage)
+        // is a different case from a confirmed disqualification — it is surfaced honestly as an
+        // unverified item rather than silently dropped or presented as a confirmed match
+        // (constitution Principle V "honest partial response", FR-005).
+        var unverified = candidates.Where(c => !c.PriceVerified).ToList();
+
+        if (withinBudget.Count == 0 && unverified.Count == 0)
         {
             return new Recommendation
             {
@@ -38,7 +45,9 @@ public static class ScoringPolicy
 
         var items = withinBudget
             .Select(candidate => BuildRecommendedItem(candidate, requirement, withinBudget))
-            .OrderByDescending(i => i.Score)
+            .Concat(unverified.Select(candidate => BuildRecommendedItem(candidate, requirement, withinBudget)))
+            .OrderByDescending(i => i.Candidate.PriceVerified)
+            .ThenByDescending(i => i.Score)
             .ThenBy(i => i.Candidate.Name, StringComparer.Ordinal)
             .ToList();
 
@@ -54,7 +63,11 @@ public static class ScoringPolicy
     private static RecommendedItem BuildRecommendedItem(
         ProductCandidate candidate, UserRequirement requirement, IReadOnlyList<ProductCandidate> withinBudgetSet)
     {
-        var matched = new List<string> { $"budget ≤ {requirement.Budget!.Amount} {requirement.Budget.Currency}" };
+        // Only a *verified* price can honestly be claimed to meet the budget (FR-005) — an
+        // unverified candidate skips this claim entirely rather than implying a confirmed match.
+        var matched = candidate.PriceVerified
+            ? new List<string> { $"budget ≤ {requirement.Budget!.Amount} {requirement.Budget.Currency}" }
+            : [];
         var unmatchedRequirements = new List<string>();
 
         foreach (var feature in requirement.RequiredFeatures)
@@ -127,7 +140,13 @@ public static class ScoringPolicy
     private static List<string> BuildTradeOffs(
         ProductCandidate candidate, IReadOnlyList<ProductCandidate> withinBudgetSet, List<string> unmatchedRequirements)
     {
-        var tradeOffs = unmatchedRequirements.Select(f => $"Does not clearly satisfy: {f}").ToList();
+        var tradeOffs = new List<string>();
+        if (!candidate.PriceVerified)
+        {
+            tradeOffs.Add("Price and availability could not be verified right now.");
+        }
+
+        tradeOffs.AddRange(unmatchedRequirements.Select(f => $"Does not clearly satisfy: {f}"));
 
         foreach (var spec in candidate.Specifications)
         {

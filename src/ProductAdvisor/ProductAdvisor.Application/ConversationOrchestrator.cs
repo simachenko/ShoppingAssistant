@@ -24,6 +24,10 @@ public sealed class ConversationOrchestrator(
         If you do not yet know the product category and budget, ask exactly one focused
         clarifying question instead of calling get_recommendations. Once you call a tool,
         narrate its result faithfully without adding facts it did not return.
+        When the user asks to compare two or more named products, first resolve their product
+        ids (e.g., via search_products) and then call compare_products — do not write your own
+        side-by-side comparison, rating, or delta from search/detail results alone; those are
+        only ever computed by compare_products.
         """;
 
     public async Task<AdvisorTurnResult> ProcessMessageAsync(
@@ -89,6 +93,12 @@ public sealed class ConversationOrchestrator(
 
     private AdvisorTurnResult FinalizeTurn(ConversationSession session, string narration)
     {
+        if (resultCapture.Comparison is not null)
+        {
+            session.StartComparing();
+            return AdvisorTurnResult.ForComparison(narration, resultCapture.Comparison);
+        }
+
         if (resultCapture.Recommendation is not null)
         {
             session.UpdateRequirement(resultCapture.RequirementUsed!);

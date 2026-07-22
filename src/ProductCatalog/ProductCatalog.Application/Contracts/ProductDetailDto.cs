@@ -5,6 +5,7 @@ public sealed record ProductDetailDto(
     string Name,
     string Brand,
     string Category,
+    Guid CategoryId,
     string Description,
     bool IsActive,
     IReadOnlyList<SpecificationDto> Specifications);

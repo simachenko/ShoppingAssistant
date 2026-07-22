@@ -15,5 +15,9 @@ public interface IToolResultCapture
     /// <summary>The exact requirement the <c>get_recommendations</c> tool was called with.</summary>
     UserRequirement? RequirementUsed { get; }
 
+    Comparison? Comparison { get; }
+
     void SetRecommendation(Recommendation recommendation, UserRequirement requirementUsed);
+
+    void SetComparison(Comparison comparison);
 }

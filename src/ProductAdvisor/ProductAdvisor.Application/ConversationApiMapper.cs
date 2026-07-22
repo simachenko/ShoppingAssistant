@@ -15,6 +15,14 @@ public static class ConversationApiMapper
             null,
             result.Recommendation!.Items.Select(ToItemResponse).ToList(),
             result.Recommendation.UnmetConstraintExplanation),
+        "comparison" => new ConversationTurnResponse(
+            "comparison",
+            result.Message,
+            null,
+            null,
+            null,
+            result.Comparison!.Criteria,
+            result.Comparison.Rows.Select(ToRowResponse).ToList()),
         _ => throw new NotSupportedException($"Unknown turn result type '{result.Type}'."),
     };
 
@@ -39,4 +47,11 @@ public static class ConversationApiMapper
         item.MatchedRequirements,
         item.TradeOffs,
         item.Score);
+
+    private static ComparisonRowResponse ToRowResponse(ComparisonRow row) => new(
+        row.Candidate.ProductId,
+        row.Candidate.Name,
+        row.ValuesByCriterion,
+        row.Rating,
+        row.DeltasVsBest);
 }

@@ -9,6 +9,7 @@ public sealed record CatalogProductDto(
     string Name,
     string Brand,
     string Category,
+    Guid CategoryId,
     IReadOnlyList<CatalogSpecificationDto> Specifications);
 
 public sealed record CatalogSearchResponse(IReadOnlyList<CatalogProductDto> Items, int Page, int PageSize, int TotalCount);

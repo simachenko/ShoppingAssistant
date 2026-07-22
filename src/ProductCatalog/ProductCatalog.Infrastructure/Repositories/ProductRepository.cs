@@ -13,8 +13,10 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
 
         if (!string.IsNullOrWhiteSpace(category))
         {
+            // Case-insensitive: the LLM may pass "smartphones" for "Smartphones" — same
+            // tolerance already applied to the free-text query below.
             var matchingCategoryIds = await dbContext.Categories
-                .Where(c => c.Name == category)
+                .Where(c => EF.Functions.ILike(c.Name, category))
                 .Select(c => c.CategoryId)
                 .ToListAsync(cancellationToken);
 
@@ -62,5 +64,5 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
     }
 
     public Task<Category?> FindCategoryByNameAsync(string name, CancellationToken cancellationToken) =>
-        dbContext.Categories.FirstOrDefaultAsync(c => c.Name == name, cancellationToken);
+        dbContext.Categories.FirstOrDefaultAsync(c => EF.Functions.ILike(c.Name, name), cancellationToken);
 }

@@ -102,6 +102,44 @@ else if (_lastTurn is { Type: "recommendation" })
         <div class="alert alert-warning">@_lastTurn.UnmetConstraintExplanation</div>
     }
 }
+else if (_lastTurn is { Type: "comparison", Criteria: not null, Rows: not null })
+{
+    <div class="comparison-table-wrapper">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    @foreach (var criterion in _lastTurn.Criteria)
+                    {
+                        <th>@criterion</th>
+                    }
+                    <th>Rating</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _lastTurn.Rows)
+                {
+                    <tr>
+                        <td>@row.Name</td>
+                        @foreach (var criterion in _lastTurn.Criteria)
+                        {
+                            <td>
+                                @(row.Values.GetValueOrDefault(criterion) ?? "Not verified")
+                                @{ var delta = row.DeltasVsBest.GetValueOrDefault(criterion); }
+                                @if (!string.IsNullOrEmpty(delta))
+                                {
+                                    <br />
+                                    <small>@delta</small>
+                                }
+                            </td>
+                        }
+                        <td>@row.Rating</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
 
 <div class="chat-input">
     <input @bind="_draftMessage" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
@@ -204,7 +242,7 @@ else if (_lastTurn is { Type: "recommendation" })
         var narration = turn.Type switch
         {
             "clarification" => turn.Question ?? "",
-            "recommendation" => turn.Message ?? "",
+            "recommendation" or "comparison" => turn.Message ?? "",
             _ => "",
         };
         _history.Add(("assistant", narration));

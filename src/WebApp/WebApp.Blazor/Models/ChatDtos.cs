@@ -15,13 +15,22 @@ public sealed record RecommendedItemDto(
     IReadOnlyList<string> TradeOffs,
     decimal Score);
 
+public sealed record ComparisonRowDto(
+    Guid ProductId,
+    string Name,
+    IReadOnlyDictionary<string, string?> Values,
+    decimal Rating,
+    IReadOnlyDictionary<string, string> DeltasVsBest);
+
 public sealed record ChatTurnDto(
     Guid SessionId,
     string Type,
     string? Message,
     string? Question,
     IReadOnlyList<RecommendedItemDto>? Items,
-    string? UnmetConstraintExplanation);
+    string? UnmetConstraintExplanation,
+    IReadOnlyList<string>? Criteria = null,
+    IReadOnlyList<ComparisonRowDto>? Rows = null);
 
 /// <summary>
 /// One item from the Gateway's streaming chat endpoint (FR-015/research.md §11) — either a

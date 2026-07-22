@@ -51,6 +51,22 @@ app.MapGet("/api/catalog/products", async (
     return Results.Ok(result);
 });
 
+// GET /api/catalog/products/{productId} — single product detail (contracts/catalog-api.md)
+app.MapGet("/api/catalog/products/{productId:guid}", async (
+    Guid productId, ProductCatalogService service, CancellationToken ct) =>
+{
+    var product = await service.GetProductDetailAsync(productId, ct);
+    return product is null ? Results.NotFound() : Results.Ok(product);
+});
+
+// GET /api/catalog/categories/{categoryId} — category (incl. ComparableAttributeKeys) (contracts/catalog-api.md)
+app.MapGet("/api/catalog/categories/{categoryId:guid}", async (
+    Guid categoryId, ProductCatalogService service, CancellationToken ct) =>
+{
+    var category = await service.GetCategoryAsync(categoryId, ct);
+    return category is null ? Results.NotFound() : Results.Ok(category);
+});
+
 app.Run();
 
 public partial class Program;

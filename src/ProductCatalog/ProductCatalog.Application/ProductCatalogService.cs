@@ -47,6 +47,7 @@ public sealed class ProductCatalogService(IProductRepository repository)
             product.Name,
             brand?.Name ?? "",
             category?.Name ?? "",
+            product.CategoryId,
             product.Description,
             product.IsActive,
             product.Specifications.Select(ToSpecDto).ToList());
@@ -59,7 +60,8 @@ public sealed class ProductCatalogService(IProductRepository repository)
     }
 
     private static ProductSummaryDto ToSummary(Product product, string brandName, string categoryName) =>
-        new(product.ProductId, product.Name, brandName, categoryName, product.Specifications.Select(ToSpecDto).ToList());
+        new(product.ProductId, product.Name, brandName, categoryName, product.CategoryId,
+            product.Specifications.Select(ToSpecDto).ToList());
 
     private static SpecificationDto ToSpecDto(Specification spec) => new(spec.Key, spec.Value, spec.Unit);
 

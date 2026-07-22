@@ -1,14 +1,23 @@
 namespace ProductAdvisor.Application.Contracts;
 
 // Mirrors contracts/advisor-conversation-api.md. "type" discriminates clarification vs
-// recommendation (vs comparison, once US2 is wired). All structured fields here are copied
-// verbatim from the underlying tool result — "message"/"question" is the only LLM-authored text.
+// recommendation vs comparison. All structured fields here are copied verbatim from the
+// underlying tool result — "message"/"question" is the only LLM-authored text.
 public sealed record ConversationTurnResponse(
     string Type,
     string? Message,
     string? Question,
     IReadOnlyList<RecommendedItemResponse>? Items,
-    string? UnmetConstraintExplanation);
+    string? UnmetConstraintExplanation,
+    IReadOnlyList<string>? Criteria = null,
+    IReadOnlyList<ComparisonRowResponse>? Rows = null);
+
+public sealed record ComparisonRowResponse(
+    Guid ProductId,
+    string Name,
+    IReadOnlyDictionary<string, string?> Values,
+    decimal Rating,
+    IReadOnlyDictionary<string, string> DeltasVsBest);
 
 public sealed record RecommendedItemResponse(
     Guid ProductId,

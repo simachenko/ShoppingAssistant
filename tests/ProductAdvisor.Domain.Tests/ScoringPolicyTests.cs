@@ -64,14 +64,48 @@ public class ScoringPolicyTests
     }
 
     [Fact]
-    public void Score_excludes_candidates_with_unverified_price()
+    public void Score_includes_unverified_candidates_as_honest_partial_items_instead_of_dropping_them()
     {
+        // Constitution Principle V / contracts/advisor-conversation-api.md: a Pricing outage
+        // (all candidates unverified) still yields recommendation items with priceVerified:false
+        // rather than an empty result claiming nothing matches.
         var requirement = new UserRequirement { Category = "smartphones", Budget = new Money(15000m, "UAH") };
         var unverified = Candidate("Mystery Phone", 14000m, priceVerified: false);
 
         var result = ScoringPolicy.Score(requirement, [unverified]);
 
-        Assert.Empty(result.Items);
+        Assert.Null(result.UnmetConstraintExplanation);
+        Assert.Single(result.Items);
+        Assert.False(result.Items[0].Candidate.PriceVerified);
+        Assert.DoesNotContain(result.Items[0].MatchedRequirements, m => m.StartsWith("budget", StringComparison.Ordinal));
+        Assert.Contains(result.Items[0].TradeOffs, t => t.Contains("could not be verified"));
+    }
+
+    [Fact]
+    public void Score_ranks_verified_within_budget_candidates_above_unverified_ones()
+    {
+        var requirement = new UserRequirement { Category = "smartphones", Budget = new Money(15000m, "UAH") };
+        var verified = Candidate("Verified Phone", 14000m);
+        var unverified = Candidate("Mystery Phone", 14000m, priceVerified: false);
+
+        var result = ScoringPolicy.Score(requirement, [unverified, verified]);
+
+        Assert.Equal(2, result.Items.Count);
+        Assert.Equal("Verified Phone", result.Items[0].Candidate.Name);
+        Assert.Equal("Mystery Phone", result.Items[1].Candidate.Name);
+    }
+
+    [Fact]
+    public void Score_still_hard_excludes_a_verified_over_budget_candidate_even_when_unverified_candidates_are_present()
+    {
+        var requirement = new UserRequirement { Category = "smartphones", Budget = new Money(15000m, "UAH") };
+        var overBudget = Candidate("Expensive Phone", 20000m);
+        var unverified = Candidate("Mystery Phone", 14000m, priceVerified: false);
+
+        var result = ScoringPolicy.Score(requirement, [overBudget, unverified]);
+
+        Assert.Single(result.Items);
+        Assert.Equal("Mystery Phone", result.Items[0].Candidate.Name);
     }
 
     [Fact]

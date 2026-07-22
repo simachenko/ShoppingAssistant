@@ -29,5 +29,9 @@ public sealed class AdvisorToolCatalog(DataAccessTools dataAccessTools, ComputeT
             computeTools.GetRecommendationsAsync,
             "get_recommendations",
             "Given a fully-specified need (category, budget, required features, preferences), return a ranked, deterministically scored set of matching products with pre-computed match reasons and trade-offs — or an explanation of why nothing matches. Do not attempt to filter, rank, or score candidates yourself; always call this tool once category and budget are known."),
+        AIFunctionFactory.Create(
+            computeTools.CompareProductsAsync,
+            "compare_products",
+            "Given two or more product ids, return their specifications side-by-side using one shared set of criteria, plus a deterministic rating per product and computed deltas versus the best value in the set for each criterion. Do not compute comparisons, ratings, or differences yourself — always call this tool and only elaborate on its output."),
     ];
 }

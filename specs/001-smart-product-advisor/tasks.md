@@ -334,39 +334,39 @@ characteristic explicitly marked rather than guessed.
 
 ### Tests for User Story 2
 
-- [ ] T045 [P] [US2] Contract tests for `GET /api/catalog/products/{productId}` and
+- [X] T045 [P] [US2] Contract tests for `GET /api/catalog/products/{productId}` and
       `GET /api/catalog/categories/{categoryId}` in
       `tests/ProductCatalog.Api.Tests/ProductAndCategoryDetailContractTests.cs`.
-- [ ] T046 [P] [US2] Unit tests for `ComparisonEngine` — shared criteria, deterministic rating,
+- [X] T046 [P] [US2] Unit tests for `ComparisonEngine` — shared criteria, deterministic rating,
       `deltasVsBest`, unverifiable-value handling — in
       `tests/ProductAdvisor.Domain.Tests/ComparisonEngineTests.cs`.
-- [ ] T047 [P] [US2] MCP tool contract test for `compare_products` — schema, ≥2-id requirement,
+- [X] T047 [P] [US2] MCP tool contract test for `compare_products` — schema, ≥2-id requirement,
       determinism across repeated calls — in
       `tests/ProductAdvisor.Api.Tests/CompareProductsToolTests.cs`.
-- [ ] T048 [P] [US2] Contract test for the conversation API's comparison response shape in
+- [X] T048 [P] [US2] Contract test for the conversation API's comparison response shape in
       `tests/ProductAdvisor.Api.Tests/ConversationApiContractTests.cs`.
 
 ### Implementation for User Story 2
 
-- [ ] T049 [P] [US2] Implement `GET /api/catalog/products/{productId}` and
+- [X] T049 [P] [US2] Implement `GET /api/catalog/products/{productId}` and
       `GET /api/catalog/categories/{categoryId}` in
       `src/ProductCatalog/ProductCatalog.Application/` + `.Api/` (depends on T016).
-- [ ] T050 [US2] Implement the `ComparisonEngine` domain service in
+- [X] T050 [US2] Implement the `ComparisonEngine` domain service in
       `src/ProductAdvisor/ProductAdvisor.Domain/ComparisonEngine.cs`.
-- [ ] T051 [US2] Implement and register the `get_product_details` MCP tool in
+- [X] T051 [US2] Implement and register the `get_product_details` MCP tool in
       `src/ProductAdvisor/ProductAdvisor.Infrastructure/Tools/` + `.Api/` (depends on T049,
       T037).
-- [ ] T052 [US2] Implement and register the `compare_products` MCP tool — concurrent detail +
+- [X] T052 [US2] Implement and register the `compare_products` MCP tool — concurrent detail +
       price/availability fetch, then `ComparisonEngine` — in
       `src/ProductAdvisor/ProductAdvisor.Infrastructure/Tools/CompareProductsTool.cs` (depends
       on T050, T051).
-- [ ] T053 [US2] Extend the conversation orchestration loop and
+- [X] T053 [US2] Extend the conversation orchestration loop and
       `POST /api/conversations/{sessionId}/messages` to support the comparison response shape
       in `src/ProductAdvisor/ProductAdvisor.Application/` + `.Api/` (depends on T052, T040).
-- [ ] T054 [US2] Implement the Blazor comparison view — shared criteria table, per-product
+- [X] T054 [US2] Implement the Blazor comparison view — shared criteria table, per-product
       rating, `deltasVsBest`, unverified markers — in `src/WebApp/WebApp.Blazor/` (depends on
       T053, T043).
-- [ ] T055 [US2] EndToEnd test covering quickstart Scenario 4 (consistent criteria + rating/delta
+- [X] T055 [US2] EndToEnd test covering quickstart Scenario 4 (consistent criteria + rating/delta
       determinism) in `tests/EndToEnd.Tests/ComparisonScenarioTests.cs` (depends on T054).
 
 **Checkpoint**: User Stories 1 and 2 both work independently.

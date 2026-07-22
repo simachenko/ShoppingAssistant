@@ -4,8 +4,8 @@ namespace ProductAdvisor.Application;
 
 /// <summary>
 /// What the orchestrator produced for one conversation turn — always either a clarification
-/// question or a tool-produced result (recommendation now, comparison once US2 is wired), never
-/// a value the orchestrator computed itself.
+/// question or a tool-produced result (recommendation or comparison), never a value the
+/// orchestrator computed itself.
 /// </summary>
 public sealed record AdvisorTurnResult
 {
@@ -13,10 +13,14 @@ public sealed record AdvisorTurnResult
     public string? Message { get; init; }
     public string? Question { get; init; }
     public Recommendation? Recommendation { get; init; }
+    public Comparison? Comparison { get; init; }
 
     public static AdvisorTurnResult ForClarification(string question) =>
         new() { Type = "clarification", Question = question };
 
     public static AdvisorTurnResult ForRecommendation(string message, Recommendation recommendation) =>
         new() { Type = "recommendation", Message = message, Recommendation = recommendation };
+
+    public static AdvisorTurnResult ForComparison(string message, Comparison comparison) =>
+        new() { Type = "comparison", Message = message, Comparison = comparison };
 }

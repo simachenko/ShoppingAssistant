@@ -5,4 +5,5 @@ public sealed record ProductSummaryDto(
     string Name,
     string Brand,
     string Category,
+    Guid CategoryId,
     IReadOnlyList<SpecificationDto> Specifications);

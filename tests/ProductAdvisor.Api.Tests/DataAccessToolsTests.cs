@@ -42,6 +42,7 @@ public sealed class DataAccessToolsTests : IAsyncDisposable
         Assert.Contains("get_product_details", names);
         Assert.Contains("check_price_and_availability", names);
         Assert.Contains("get_recommendations", names);
+        Assert.Contains("compare_products", names);
     }
 
     [Fact]

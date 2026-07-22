@@ -41,7 +41,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
         {
             CatalogResponder = _ => (HttpStatusCode.OK, new CatalogSearchResponse(
                 [
-                    new CatalogProductDto(productId, "Galaxy S24", "Samsung", "Smartphones",
+                    new CatalogProductDto(productId, "Galaxy S24", "Samsung", "Smartphones", Guid.NewGuid(),
                         [new CatalogSpecificationDto("camera_mp", "50", "MP")]),
                 ], 1, 50, 1)),
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
@@ -78,6 +78,67 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
     }
 
     [Fact]
+    public async Task Comparison_response_reflects_the_compare_products_tool_output_verbatim()
+    {
+        var productA = Guid.NewGuid();
+        var productB = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        await using var factory = new AdvisorApiFactory(fixture.ConnectionString)
+        {
+            CatalogResponder = request =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                if (path == $"/api/catalog/products/{productA}")
+                {
+                    return (HttpStatusCode.OK, new CatalogProductDto(productA, "Galaxy S24", "Samsung", "Smartphones",
+                        categoryId, [new CatalogSpecificationDto("camera_mp", "50", "MP")]));
+                }
+
+                if (path == $"/api/catalog/products/{productB}")
+                {
+                    return (HttpStatusCode.OK, new CatalogProductDto(productB, "Pixel 9", "Google", "Smartphones",
+                        categoryId, [new CatalogSpecificationDto("camera_mp", "48", "MP")]));
+                }
+
+                if (path == $"/api/catalog/categories/{categoryId}")
+                {
+                    return (HttpStatusCode.OK, new CatalogCategoryDto(categoryId, "Smartphones", ["camera_mp"]));
+                }
+
+                return (HttpStatusCode.NotFound, null);
+            },
+            PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
+                [
+                    new PricingOfferDto(productA, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed"),
+                    new PricingOfferDto(productB, new PricingMoneyDto(13500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed"),
+                ], [])),
+            ChatClientOverride = new ScriptedChatClient(
+                "compare_products",
+                new Dictionary<string, object?> { ["productIds"] = new[] { productA.ToString(), productB.ToString() } },
+                "Here's how the Galaxy S24 and Pixel 9 compare."),
+        };
+        var client = factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/conversations/{sessionId}/messages",
+            new SendMessageRequest("Compare the Galaxy S24 and the Pixel 9"));
+
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<ConversationTurnResponse>();
+        Assert.NotNull(body);
+        Assert.Equal("comparison", body!.Type);
+        Assert.Null(body.Items);
+        Assert.NotNull(body.Criteria);
+        Assert.Equal(["price", "camera_mp", "availability"], body.Criteria);
+        Assert.NotNull(body.Rows);
+        Assert.Equal(2, body.Rows!.Count);
+        Assert.Contains(body.Rows, r => r.Name == "Galaxy S24" && r.Values["camera_mp"] == "50");
+        Assert.Contains(body.Rows, r => r.Name == "Pixel 9" && r.Values["camera_mp"] == "48");
+    }
+
+    [Fact]
     public async Task Requirement_persists_across_turns_and_is_visible_on_the_snapshot_endpoint()
     {
         var productId = Guid.NewGuid();
@@ -85,7 +146,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
         await using var factory = new AdvisorApiFactory(fixture.ConnectionString)
         {
             CatalogResponder = _ => (HttpStatusCode.OK, new CatalogSearchResponse(
-                [new CatalogProductDto(productId, "XPS 13", "Dell", "Laptops", [])], 1, 50, 1)),
+                [new CatalogProductDto(productId, "XPS 13", "Dell", "Laptops", Guid.NewGuid(), [])], 1, 50, 1)),
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
                 [new PricingOfferDto(productId, new PricingMoneyDto(25000m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], [])),
             ChatClientOverride = new ScriptedChatClient(
