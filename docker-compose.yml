@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  catalog-api:
+    build:
+      context: .
+      dockerfile: src/ProductCatalog/ProductCatalog.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__catalogdb: "Host=postgres;Database=catalogdb;Username=catalog_role;Password=catalog_dev_password"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5101:8080"
+
+  pricing-api:
+    build:
+      context: .
+      dockerfile: src/PricingAvailability/PricingAvailability.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__pricingdb: "Host=postgres;Database=pricingdb;Username=pricing_role;Password=pricing_dev_password"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5102:8080"
+
+  advisor-api:
+    build:
+      context: .
+      dockerfile: src/ProductAdvisor/ProductAdvisor.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__advisordb: "Host=postgres;Database=advisordb;Username=advisor_role;Password=advisor_dev_password"
+      services__catalog-api__http__0: "http://catalog-api:8080"
+      services__pricing-api__http__0: "http://pricing-api:8080"
+      # LlmProvider__* configures the swappable Microsoft.Extensions.AI chat client (research.md §10).
+      LlmProvider__Endpoint: "${LLM_PROVIDER_ENDPOINT:-}"
+      LlmProvider__ApiKey: "${LLM_PROVIDER_API_KEY:-}"
+      LlmProvider__Model: "${LLM_PROVIDER_MODEL:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      catalog-api:
+        condition: service_started
+      pricing-api:
+        condition: service_started
+    ports:
+      - "5103:8080"
+
+  gateway-api:
+    build:
+      context: .
+      dockerfile: src/Gateway/Gateway.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      services__catalog-api__http__0: "http://catalog-api:8080"
+      services__pricing-api__http__0: "http://pricing-api:8080"
+      services__advisor-api__http__0: "http://advisor-api:8080"
+    depends_on:
+      - catalog-api
+      - pricing-api
+      - advisor-api
+    ports:
+      - "5100:8080"
+
+  webapp:
+    build:
+      context: .
+      dockerfile: src/WebApp/WebApp.Blazor/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      services__gateway-api__http__0: "http://gateway-api:8080"
+    depends_on:
+      - gateway-api
+    ports:
+      - "5000:8080"
+
+volumes:
+  postgres-data:

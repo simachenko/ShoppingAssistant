@@ -1,0 +1,23 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ProductCatalog\ProductCatalog.Api\ProductCatalog.Api.csproj" />
+    <ProjectReference Include="..\..\PricingAvailability\PricingAvailability.Api\PricingAvailability.Api.csproj" />
+    <ProjectReference Include="..\..\ProductAdvisor\ProductAdvisor.Api\ProductAdvisor.Api.csproj" />
+    <ProjectReference Include="..\..\Gateway\Gateway.Api\Gateway.Api.csproj" />
+    <ProjectReference Include="..\..\WebApp\WebApp.Blazor\WebApp.Blazor.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>d20b2c65-cfed-421d-94f3-f1a20ee1485a</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

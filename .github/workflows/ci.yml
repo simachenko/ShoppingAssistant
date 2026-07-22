@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore src/ProductAdvisor.slnx
+
+      - name: Build
+        run: dotnet build src/ProductAdvisor.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test src/ProductAdvisor.slnx --no-build --configuration Release --logger "trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+
+  docker-image-validation:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    strategy:
+      matrix:
+        service:
+          - { name: catalog-api, dockerfile: src/ProductCatalog/ProductCatalog.Api/Dockerfile }
+          - { name: pricing-api, dockerfile: src/PricingAvailability/PricingAvailability.Api/Dockerfile }
+          - { name: advisor-api, dockerfile: src/ProductAdvisor/ProductAdvisor.Api/Dockerfile }
+          - { name: gateway-api, dockerfile: src/Gateway/Gateway.Api/Dockerfile }
+          - { name: webapp, dockerfile: src/WebApp/WebApp.Blazor/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service.dockerfile }}
+          push: false
+          tags: product-advisor/${{ matrix.service.name }}:ci
+
+  end-to-end:
+    runs-on: ubuntu-latest
+    needs: docker-image-validation
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up the full stack
+        run: docker compose up --build -d
+
+      - name: Wait for services to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5100/health > /dev/null; then
+              echo "Gateway healthy"; break
+            fi
+            sleep 5
+          done
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Run EndToEnd scenario tests
+        run: dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj --configuration Release
+
+      - name: Tear down the stack
+        if: always()
+        run: docker compose down -v
+
+  # Deploy step: Render's native git-triggered auto-deploy (render.yaml Blueprint) handles
+  # deployment on push to main once this workflow's checks pass — see research.md §9.
+  # The fallback path (build/push images + call Render's deploy-hook API) is documented in
+  # quickstart.md if Blueprint auto-deploy proves insufficient.

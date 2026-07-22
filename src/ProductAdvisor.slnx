@@ -1,0 +1,42 @@
+<Solution>
+  <Folder Name="/Aspire/">
+    <Project Path="Aspire/AppHost/AppHost.csproj" />
+    <Project Path="Aspire/ServiceDefaults/ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/Gateway/">
+    <Project Path="Gateway/Gateway.Api/Gateway.Api.csproj" />
+  </Folder>
+  <Folder Name="/PricingAvailability/">
+    <Project Path="PricingAvailability/PricingAvailability.Api/PricingAvailability.Api.csproj" />
+    <Project Path="PricingAvailability/PricingAvailability.Application/PricingAvailability.Application.csproj" />
+    <Project Path="PricingAvailability/PricingAvailability.Domain/PricingAvailability.Domain.csproj" />
+    <Project Path="PricingAvailability/PricingAvailability.Infrastructure/PricingAvailability.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/ProductAdvisor/">
+    <Project Path="ProductAdvisor/ProductAdvisor.Api/ProductAdvisor.Api.csproj" />
+    <Project Path="ProductAdvisor/ProductAdvisor.Application/ProductAdvisor.Application.csproj" />
+    <Project Path="ProductAdvisor/ProductAdvisor.Domain/ProductAdvisor.Domain.csproj" />
+    <Project Path="ProductAdvisor/ProductAdvisor.Infrastructure/ProductAdvisor.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/ProductCatalog/">
+    <Project Path="ProductCatalog/ProductCatalog.Api/ProductCatalog.Api.csproj" />
+    <Project Path="ProductCatalog/ProductCatalog.Application/ProductCatalog.Application.csproj" />
+    <Project Path="ProductCatalog/ProductCatalog.Domain/ProductCatalog.Domain.csproj" />
+    <Project Path="ProductCatalog/ProductCatalog.Infrastructure/ProductCatalog.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/WebApp/">
+    <Project Path="WebApp/WebApp.Blazor/WebApp.Blazor.csproj" />
+  </Folder>
+  <Project Path="../tests/EndToEnd.Tests/EndToEnd.Tests.csproj" />
+  <Project Path="../tests/Gateway.Api.Tests/Gateway.Api.Tests.csproj" />
+  <Project Path="../tests/PricingAvailability.Api.Tests/PricingAvailability.Api.Tests.csproj" />
+  <Project Path="../tests/PricingAvailability.Application.Tests/PricingAvailability.Application.Tests.csproj" />
+  <Project Path="../tests/PricingAvailability.Domain.Tests/PricingAvailability.Domain.Tests.csproj" />
+  <Project Path="../tests/ProductAdvisor.Api.Tests/ProductAdvisor.Api.Tests.csproj" />
+  <Project Path="../tests/ProductAdvisor.Application.Tests/ProductAdvisor.Application.Tests.csproj" />
+  <Project Path="../tests/ProductAdvisor.Domain.Tests/ProductAdvisor.Domain.Tests.csproj" />
+  <Project Path="../tests/ProductCatalog.Api.Tests/ProductCatalog.Api.Tests.csproj" />
+  <Project Path="../tests/ProductCatalog.Application.Tests/ProductCatalog.Application.Tests.csproj" />
+  <Project Path="../tests/ProductCatalog.Domain.Tests/ProductCatalog.Domain.Tests.csproj" />
+  <Project Path="../tests/TestSupport/TestSupport.csproj" />
+</Solution>

@@ -1,0 +1,140 @@
+@page "/"
+@rendermode InteractiveServer
+@using WebApp.Blazor.Models
+@using WebApp.Blazor.Services
+@inject GatewayApiClient GatewayApi
+
+<PageTitle>Smart Product Advisor</PageTitle>
+
+<h1>Smart Product Advisor</h1>
+
+<p>
+    Describe what you're looking for — e.g. "I need a smartphone with a good camera and a
+    budget of up to 15,000 UAH" — and get a grounded, explained recommendation.
+</p>
+
+<div class="chat-history">
+    @foreach (var entry in _history)
+    {
+        <div class="chat-message chat-message-@entry.Role">
+            <strong>@(entry.Role == "user" ? "You" : "Advisor")</strong>
+            <p>@entry.Text</p>
+        </div>
+    }
+</div>
+
+@if (_lastTurn is { Type: "clarification" })
+{
+    <div class="alert alert-info">@_lastTurn.Question</div>
+}
+else if (_errorMessage is not null)
+{
+    <div class="alert alert-danger">@_errorMessage</div>
+}
+else if (_lastTurn is { Type: "recommendation" })
+{
+    @if (_lastTurn.Items is { Count: > 0 })
+    {
+        <div class="recommendation-list">
+            @foreach (var item in _lastTurn.Items)
+            {
+                <div class="recommendation-card">
+                    <h3>@item.Name</h3>
+                    <p>
+                        @if (item.Price is not null)
+                        {
+                            <span>@item.Price.Amount @item.Price.Currency</span>
+                            @if (!item.PriceVerified)
+                            {
+                                <em> (price could not be verified)</em>
+                            }
+                        }
+                        else
+                        {
+                            <em>Price could not be verified</em>
+                        }
+                        —
+                        @if (item.AvailabilityVerified)
+                        {
+                            <span>@item.Availability</span>
+                        }
+                        else
+                        {
+                            <em>Availability could not be verified</em>
+                        }
+                    </p>
+                    <p><strong>Why it matches:</strong> @string.Join("; ", item.MatchedRequirements)</p>
+                    <p><strong>Trade-offs:</strong> @string.Join("; ", item.TradeOffs)</p>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-warning">@_lastTurn.UnmetConstraintExplanation</div>
+    }
+}
+
+<div class="chat-input">
+    <input @bind="_draftMessage" @bind:event="oninput" @onkeydown="OnKeyDownAsync"
+           placeholder="Describe what you're looking for..." disabled="@_isSending" />
+    <button @onclick="SendAsync" disabled="@(_isSending || string.IsNullOrWhiteSpace(_draftMessage))">
+        Send
+    </button>
+</div>
+
+@code {
+    private readonly List<(string Role, string Text)> _history = [];
+    private string _draftMessage = "";
+    private bool _isSending;
+    private Guid? _sessionId;
+    private ChatTurnDto? _lastTurn;
+    private string? _errorMessage;
+
+    private async Task OnKeyDownAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_draftMessage) || _isSending)
+        {
+            return;
+        }
+
+        var message = _draftMessage;
+        _draftMessage = "";
+        _isSending = true;
+        _errorMessage = null;
+        _history.Add(("user", message));
+
+        try
+        {
+            var turn = await GatewayApi.SendMessageAsync(_sessionId, message, CancellationToken.None);
+            _sessionId = turn.SessionId;
+            _lastTurn = turn;
+
+            var narration = turn.Type switch
+            {
+                "clarification" => turn.Question ?? "",
+                "recommendation" => turn.Message ?? "",
+                _ => "",
+            };
+            _history.Add(("assistant", narration));
+        }
+        catch (Exception)
+        {
+            // Honest partial response at the UI layer too (constitution Principle V): a
+            // downstream outage must not crash the chat, it must say so.
+            _errorMessage = "Sorry, the advisor isn't reachable right now. Please try again shortly.";
+        }
+        finally
+        {
+            _isSending = false;
+        }
+    }
+}

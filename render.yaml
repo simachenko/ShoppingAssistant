@@ -1,0 +1,95 @@
+# Render Blueprint — one free-tier web service per deployable, per plan.md.
+# Actual secret values (connection strings, LLM provider key) are set in the Render
+# dashboard/environment groups, never committed here (constitution Principle I).
+services:
+  - type: web
+    name: catalog-api
+    runtime: docker
+    dockerfilePath: ./src/ProductCatalog/ProductCatalog.Api/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__catalogdb
+        sync: false
+
+  - type: web
+    name: pricing-api
+    runtime: docker
+    dockerfilePath: ./src/PricingAvailability/PricingAvailability.Api/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__pricingdb
+        sync: false
+
+  - type: web
+    name: advisor-api
+    runtime: docker
+    dockerfilePath: ./src/ProductAdvisor/ProductAdvisor.Api/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__advisordb
+        sync: false
+      - key: services__catalog-api__http__0
+        fromService:
+          name: catalog-api
+          type: web
+          property: hostport
+      - key: services__pricing-api__http__0
+        fromService:
+          name: pricing-api
+          type: web
+          property: hostport
+      - key: LlmProvider__Endpoint
+        sync: false
+      - key: LlmProvider__ApiKey
+        sync: false
+      - key: LlmProvider__Model
+        sync: false
+
+  - type: web
+    name: gateway-api
+    runtime: docker
+    dockerfilePath: ./src/Gateway/Gateway.Api/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: services__catalog-api__http__0
+        fromService:
+          name: catalog-api
+          type: web
+          property: hostport
+      - key: services__pricing-api__http__0
+        fromService:
+          name: pricing-api
+          type: web
+          property: hostport
+      - key: services__advisor-api__http__0
+        fromService:
+          name: advisor-api
+          type: web
+          property: hostport
+
+  - type: web
+    name: webapp
+    runtime: docker
+    dockerfilePath: ./src/WebApp/WebApp.Blazor/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: services__gateway-api__http__0
+        fromService:
+          name: gateway-api
+          type: web
+          property: hostport
