@@ -25,9 +25,12 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<PricingDbContext>();
     await db.Database.MigrateAsync();
 
-    if (app.Configuration.GetValue<bool>("SeedDemoData") && !await db.Offers.AnyAsync())
+    if (app.Configuration.GetValue<bool>("SeedDemoData"))
     {
-        db.Offers.AddRange(DemoSeedData.Offers);
+        // Per-row idempotent (not just "table is empty"), so the demo dataset can grow over time
+        // without wiping/duplicating whatever a previous seed run already inserted.
+        var existingOfferIds = (await db.Offers.Select(o => o.OfferId).ToListAsync()).ToHashSet();
+        db.Offers.AddRange(DemoSeedData.Offers.Where(o => !existingOfferIds.Contains(o.OfferId)));
         await db.SaveChangesAsync();
     }
 }

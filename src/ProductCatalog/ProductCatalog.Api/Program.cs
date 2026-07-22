@@ -25,11 +25,17 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
     await db.Database.MigrateAsync();
 
-    if (app.Configuration.GetValue<bool>("SeedDemoData") && !await db.Products.AnyAsync())
+    if (app.Configuration.GetValue<bool>("SeedDemoData"))
     {
-        db.Brands.AddRange(DemoSeedData.Brands);
-        db.Categories.AddRange(DemoSeedData.Categories);
-        db.Products.AddRange(DemoSeedData.Products);
+        // Per-row idempotent (not just "table is empty"), so the demo dataset can grow over time
+        // without wiping/duplicating whatever a previous seed run already inserted.
+        var existingBrandIds = (await db.Brands.Select(b => b.BrandId).ToListAsync()).ToHashSet();
+        var existingCategoryIds = (await db.Categories.Select(c => c.CategoryId).ToListAsync()).ToHashSet();
+        var existingProductIds = (await db.Products.Select(p => p.ProductId).ToListAsync()).ToHashSet();
+
+        db.Brands.AddRange(DemoSeedData.Brands.Where(b => !existingBrandIds.Contains(b.BrandId)));
+        db.Categories.AddRange(DemoSeedData.Categories.Where(c => !existingCategoryIds.Contains(c.CategoryId)));
+        db.Products.AddRange(DemoSeedData.Products.Where(p => !existingProductIds.Contains(p.ProductId)));
         await db.SaveChangesAsync();
     }
 }
