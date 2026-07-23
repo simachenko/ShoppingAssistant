@@ -9,9 +9,36 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
     public async Task<(IReadOnlyList<Product> Items, int TotalCount)> SearchAsync(
         string? category, string? query, int page, int pageSize, CancellationToken cancellationToken)
     {
+        var productsQuery = await BuildFilteredQueryAsync(null, category, query, cancellationToken);
+
+        var totalCount = await productsQuery.CountAsync(cancellationToken);
+
+        var items = await productsQuery
+            .OrderBy(p => p.Name)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
+    public async Task<IReadOnlyList<Product>> SearchAllAsync(
+        Guid? categoryId, string? category, string? query, CancellationToken cancellationToken)
+    {
+        var productsQuery = await BuildFilteredQueryAsync(categoryId, category, query, cancellationToken);
+        return await productsQuery.OrderBy(p => p.Name).ToListAsync(cancellationToken);
+    }
+
+    private async Task<IQueryable<Product>> BuildFilteredQueryAsync(
+        Guid? categoryId, string? category, string? query, CancellationToken cancellationToken)
+    {
         var productsQuery = dbContext.Products.Where(p => p.IsActive).AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(category))
+        if (categoryId is not null)
+        {
+            productsQuery = productsQuery.Where(p => p.CategoryId == categoryId);
+        }
+        else if (!string.IsNullOrWhiteSpace(category))
         {
             // Case-insensitive: the LLM may pass "smartphones" for "Smartphones" — same
             // tolerance already applied to the free-text query below.
@@ -54,15 +81,7 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
                 select p;
         }
 
-        var totalCount = await productsQuery.CountAsync(cancellationToken);
-
-        var items = await productsQuery
-            .OrderBy(p => p.Name)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync(cancellationToken);
-
-        return (items, totalCount);
+        return productsQuery;
     }
 
     public Task<Product?> GetByIdAsync(Guid productId, CancellationToken cancellationToken) =>

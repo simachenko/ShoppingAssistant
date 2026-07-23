@@ -16,18 +16,32 @@ public sealed class GatewayApiFactory : WebApplicationFactory<Program>
     public Func<HttpRequestMessage, HttpResponseMessage> AdvisorResponder { get; set; } =
         _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
 
+    public Func<HttpRequestMessage, HttpResponseMessage> CatalogResponder { get; set; } =
+        _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+
+    public Func<HttpRequestMessage, HttpResponseMessage> PricingResponder { get; set; } =
+        _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<AdvisorApiClient>();
             services.AddHttpClient<AdvisorApiClient>(client => client.BaseAddress = new Uri("http://advisor-api"))
-                .ConfigurePrimaryHttpMessageHandler(() => new FakeAdvisorHttpMessageHandler(req => AdvisorResponder(req)));
+                .ConfigurePrimaryHttpMessageHandler(() => new FakeHttpMessageHandler(req => AdvisorResponder(req)));
+
+            services.RemoveAll<Gateway.Api.Clients.CatalogApiClient>();
+            services.AddHttpClient<Gateway.Api.Clients.CatalogApiClient>(client => client.BaseAddress = new Uri("http://catalog-api"))
+                .ConfigurePrimaryHttpMessageHandler(() => new FakeHttpMessageHandler(req => CatalogResponder(req)));
+
+            services.RemoveAll<Gateway.Api.Clients.PricingApiClient>();
+            services.AddHttpClient<Gateway.Api.Clients.PricingApiClient>(client => client.BaseAddress = new Uri("http://pricing-api"))
+                .ConfigurePrimaryHttpMessageHandler(() => new FakeHttpMessageHandler(req => PricingResponder(req)));
         });
     }
 }
 
-internal sealed class FakeAdvisorHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
         Task.FromResult(respond(request));

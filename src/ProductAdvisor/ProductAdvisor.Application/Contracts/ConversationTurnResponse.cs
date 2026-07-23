@@ -41,3 +41,14 @@ public sealed record ConversationMessageResponse(string Role, string Text, DateT
 
 public sealed record RequirementSnapshotResponse(
     string? Category, MoneyResponse? Budget, IReadOnlyList<string> RequiredFeatures, IReadOnlyList<string> Preferences);
+
+/// <summary>Request body for the stateless, non-conversational <c>POST /api/comparisons</c> (FR-018).</summary>
+public sealed record DirectComparisonRequest(IReadOnlyList<string> ProductIds, bool IncludeExplanation = true);
+
+/// <summary>
+/// Response for <c>POST /api/comparisons</c> — <see cref="Criteria"/>/<see cref="Rows"/> come
+/// from the same shared computation the conversational path uses (SC-010); <see cref="Explanation"/>
+/// is `null` when not requested or when the separate, constrained narration call fails (FR-019).
+/// </summary>
+public sealed record DirectComparisonResponse(
+    IReadOnlyList<string> Criteria, IReadOnlyList<ComparisonRowResponse> Rows, string? Explanation);

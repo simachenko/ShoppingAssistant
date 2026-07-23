@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ProductAdvisor.Infrastructure;
@@ -11,9 +12,11 @@ using ProductAdvisor.Infrastructure;
 namespace ProductAdvisor.Infrastructure.Migrations
 {
     [DbContext(typeof(AdvisorDbContext))]
-    partial class AdvisorDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260723114659_AddLastSearchResults")]
+    partial class AddLastSearchResults
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -1,0 +1,213 @@
+@page "/products"
+@rendermode InteractiveServer
+@using WebApp.Blazor.Models
+@using WebApp.Blazor.Services
+@inject GatewayApiClient GatewayApi
+
+<PageTitle>Compare Products</PageTitle>
+
+<h1>Compare Products</h1>
+
+<p>
+    Search and filter the catalog directly, pick two or more products, and compare them —
+    entirely independent of the chat advisor. The comparison math below is computed the same
+    deterministic way either path uses (SC-010).
+</p>
+
+<div class="picker-filters">
+    <input @bind="_category" @bind:event="oninput" placeholder="Category (e.g. Smartphones)" />
+    <input @bind="_query" @bind:event="oninput" placeholder="Search keywords" />
+    <input @bind="_priceMin" placeholder="Min price" />
+    <input @bind="_priceMax" placeholder="Max price" />
+    <select @bind="_sortBy">
+        <option value="">Sort: default</option>
+        <option value="price_asc">Price: low to high</option>
+        <option value="price_desc">Price: high to low</option>
+        <option value="name">Name</option>
+    </select>
+    <button @onclick="SearchAsync" disabled="@_isSearching">Search</button>
+</div>
+
+@if (_searchError is not null)
+{
+    <div class="alert alert-danger">@_searchError</div>
+}
+
+@if (_results is { Count: > 0 })
+{
+    <div class="picker-results">
+        @foreach (var item in _results)
+        {
+            <div class="picker-card">
+                <label>
+                    <input type="checkbox" checked="@_selected.Contains(item.ProductId)"
+                           @onchange="e => ToggleSelection(item.ProductId, (bool)e.Value!)" />
+                    <strong>@item.Name</strong> (@item.Brand)
+                </label>
+                <p>
+                    @if (item.PriceVerified && item.Price is not null)
+                    {
+                        <span>@item.Price.Amount @item.Price.Currency</span>
+                    }
+                    else
+                    {
+                        <em>Price could not be verified</em>
+                    }
+                    —
+                    @if (item.AvailabilityVerified)
+                    {
+                        <span>@item.Availability</span>
+                    }
+                    else
+                    {
+                        <em>Availability could not be verified</em>
+                    }
+                </p>
+            </div>
+        }
+    </div>
+
+    <button @onclick="CompareAsync" disabled="@(_selected.Count < 2 || _selected.Count > 10 || _isComparing)">
+        Compare selected (@_selected.Count)
+    </button>
+    @if (_selected.Count > 10)
+    {
+        <span class="alert alert-warning">At most 10 products can be compared at once.</span>
+    }
+}
+else if (_hasSearched)
+{
+    <div class="alert alert-warning">No products matched.</div>
+}
+
+@if (_compareError is not null)
+{
+    <div class="alert alert-danger">@_compareError</div>
+}
+
+@if (_comparison is not null)
+{
+    <div class="comparison-table-wrapper">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    @foreach (var criterion in _comparison.Criteria)
+                    {
+                        <th>@criterion</th>
+                    }
+                    <th>Rating</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _comparison.Rows)
+                {
+                    <tr>
+                        <td>@row.Name</td>
+                        @foreach (var criterion in _comparison.Criteria)
+                        {
+                            <td>
+                                @(row.Values.GetValueOrDefault(criterion) ?? "Not verified")
+                                @{ var delta = row.DeltasVsBest.GetValueOrDefault(criterion); }
+                                @if (!string.IsNullOrEmpty(delta))
+                                {
+                                    <br />
+                                    <small>@delta</small>
+                                }
+                            </td>
+                        }
+                        <td>@row.Rating</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_comparison.Explanation))
+    {
+        <p><em>@_comparison.Explanation</em></p>
+    }
+}
+
+@code {
+    private string? _category;
+    private string? _query;
+    private string? _priceMin;
+    private string? _priceMax;
+    private string _sortBy = "";
+    private bool _isSearching;
+    private bool _hasSearched;
+    private string? _searchError;
+    private IReadOnlyList<ProductCandidateDto>? _results;
+    private readonly HashSet<Guid> _selected = [];
+    private bool _isComparing;
+    private string? _compareError;
+    private ComparisonResultDto? _comparison;
+
+    private async Task SearchAsync()
+    {
+        _isSearching = true;
+        _searchError = null;
+        _comparison = null;
+        _compareError = null;
+        _selected.Clear();
+
+        try
+        {
+            decimal? priceMin = decimal.TryParse(_priceMin, out var min) ? min : null;
+            decimal? priceMax = decimal.TryParse(_priceMax, out var max) ? max : null;
+            _results = await GatewayApi.SearchProductsAsync(
+                _category, _query, priceMin, priceMax,
+                string.IsNullOrWhiteSpace(_sortBy) ? null : _sortBy, CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            // Honest partial response at the UI layer (constitution Principle V): a downstream
+            // outage or a rejected filter must not crash the page, it must say so.
+            _searchError = "Search failed — the catalog or pricing service may be unreachable.";
+            _results = null;
+        }
+        finally
+        {
+            _hasSearched = true;
+            _isSearching = false;
+        }
+    }
+
+    private void ToggleSelection(Guid productId, bool isSelected)
+    {
+        if (isSelected)
+        {
+            _selected.Add(productId);
+        }
+        else
+        {
+            _selected.Remove(productId);
+        }
+    }
+
+    private async Task CompareAsync()
+    {
+        if (_selected.Count is < 2 or > 10)
+        {
+            return;
+        }
+
+        _isComparing = true;
+        _compareError = null;
+        _comparison = null;
+
+        try
+        {
+            _comparison = await GatewayApi.CompareAsync(_selected.ToList(), CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            _compareError = "Comparison failed — please try again shortly.";
+        }
+        finally
+        {
+            _isComparing = false;
+        }
+    }
+}

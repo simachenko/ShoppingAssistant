@@ -96,6 +96,9 @@ public sealed class ConversationOrchestrator(
         if (resultCapture.Comparison is not null)
         {
             session.StartComparing();
+            session.SetLastSearchResults(resultCapture.Comparison.Rows
+                .Select(r => new SearchResultReference(r.Candidate.ProductId, r.Candidate.Name))
+                .ToList());
             return AdvisorTurnResult.ForComparison(narration, resultCapture.Comparison);
         }
 
@@ -103,6 +106,9 @@ public sealed class ConversationOrchestrator(
         {
             session.UpdateRequirement(resultCapture.RequirementUsed!);
             session.StartRecommending();
+            session.SetLastSearchResults(resultCapture.Recommendation.Items
+                .Select(i => new SearchResultReference(i.Candidate.ProductId, i.Candidate.Name))
+                .ToList());
             return AdvisorTurnResult.ForRecommendation(narration, resultCapture.Recommendation);
         }
 
@@ -117,6 +123,24 @@ public sealed class ConversationOrchestrator(
     private static List<ChatMessage> BuildChatHistory(ConversationSession session)
     {
         var messages = new List<ChatMessage> { new(ChatRole.System, SystemPrompt) };
+
+        // Gives the LLM a reliable, structured source for ordinal follow-ups ("the first two",
+        // "the cheaper one") instead of requiring it to re-derive product ids from prior prose
+        // (FR-022, research.md §15) — the LLM still does the (legitimate) language-understanding
+        // work of matching the reference to a position, but the list itself is exact.
+        if (session.LastSearchResults.Count > 0)
+        {
+            var shown = string.Join(
+                "\n", session.LastSearchResults.Select((r, i) => $"{i + 1}. {r.Name} (id: {r.ProductId})"));
+            messages.Add(new ChatMessage(ChatRole.System,
+                $"""
+                The most recently shown products, in this order, are:
+                {shown}
+                If the user refers to them ordinally or descriptively (e.g. "the first two", "the
+                cheaper one"), resolve to these exact ids rather than asking again or guessing.
+                """));
+        }
+
         messages.AddRange(session.Messages.Select(
             m => new ChatMessage(m.Role == "user" ? ChatRole.User : ChatRole.Assistant, m.Text)));
         return messages;

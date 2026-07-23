@@ -47,5 +47,12 @@ public sealed class ConversationSessionConfiguration : IEntityTypeConfiguration<
             clarification.Property(c => c.MissingField);
             clarification.Property(c => c.QuestionText);
         });
+
+        builder.OwnsMany(s => s.LastSearchResults, results =>
+        {
+            results.ToJson();
+            results.Property(r => r.ProductId);
+            results.Property(r => r.Name);
+        });
     }
 }

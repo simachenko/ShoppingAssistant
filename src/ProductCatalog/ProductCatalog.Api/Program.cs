@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ProductCatalog.Application;
 using ProductCatalog.Application.Abstractions;
+using ProductCatalog.Application.Contracts;
 using ProductCatalog.Infrastructure;
 using ProductCatalog.Infrastructure.Repositories;
 using ProductCatalog.Infrastructure.SeedData;
@@ -71,6 +72,22 @@ app.MapGet("/api/catalog/categories/{categoryId:guid}", async (
 {
     var category = await service.GetCategoryAsync(categoryId, ct);
     return category is null ? Results.NotFound() : Results.Ok(category);
+});
+
+// POST /api/catalog/products/search — parametric search: category/free-text + structured
+// characteristic filters, evaluated deterministically (FR-020, contracts/catalog-api.md).
+app.MapPost("/api/catalog/products/search", async (
+    ProductSearchRequest request, ProductCatalogService service, CancellationToken ct) =>
+{
+    try
+    {
+        var result = await service.SearchProductsAdvancedAsync(request, ct);
+        return Results.Ok(result);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(ex.Message);
+    }
 });
 
 // GET /api/catalog/categories?name= — resolve a category by name, case-insensitively (FR-021, contracts/catalog-api.md)

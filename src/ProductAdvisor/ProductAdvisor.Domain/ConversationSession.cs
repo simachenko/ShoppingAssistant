@@ -5,11 +5,24 @@ public sealed class ConversationSession
 {
     private readonly List<ConversationMessage> _messages = [];
 
+    // A concrete List backing field (not a `{ get; } = []` interface-typed auto-property) —
+    // collection expressions targeted at a read-only interface type like IReadOnlyList<T> may
+    // compile to a fixed-size array, which throws when EF Core's owned-JSON collection
+    // materialization tries to .Add() into it while hydrating from the database.
+    private List<SearchResultReference> _lastSearchResults = [];
+
     public Guid SessionId { get; private set; }
     public ConversationState State { get; private set; } = ConversationState.Collecting;
     public IReadOnlyList<ConversationMessage> Messages => _messages;
     public UserRequirement CurrentRequirement { get; private set; } = UserRequirement.Empty;
     public ClarificationQuestion? PendingClarification { get; private set; }
+
+    /// <summary>
+    /// The most recently shown search/recommendation/comparison candidates (FR-022) — replaced,
+    /// never appended to, each time a new result set is produced, so an ordinal follow-up
+    /// ("the first two") always resolves against exactly one, current set (research.md §15).
+    /// </summary>
+    public IReadOnlyList<SearchResultReference> LastSearchResults => _lastSearchResults;
 
     public ConversationSession(Guid sessionId)
     {
@@ -67,5 +80,12 @@ public sealed class ConversationSession
     {
         PendingClarification = null;
         State = ConversationState.Comparing;
+    }
+
+    /// <summary>Replaces (never appends to) the session's memory of what was last shown (FR-022).</summary>
+    public void SetLastSearchResults(IReadOnlyList<SearchResultReference> results)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+        _lastSearchResults = [.. results];
     }
 }

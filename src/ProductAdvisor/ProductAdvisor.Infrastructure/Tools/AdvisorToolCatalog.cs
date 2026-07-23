@@ -16,7 +16,11 @@ public sealed class AdvisorToolCatalog(DataAccessTools dataAccessTools, ComputeT
         AIFunctionFactory.Create(
             dataAccessTools.SearchProductsAsync,
             "search_products",
-            "Search the retailer's catalog for products in a category, optionally matching a free-text query. Returns product identity and specifications only — no price or stock."),
+            "Search the retailer's catalog for products in a category, optionally matching a free-text query, a price range, and structured characteristic conditions (e.g., camera resolution at least 48 MP). Returns product identity, specifications, and — when a price range or sort is given — verified price/availability. Do not filter, sort, or rank the results yourself; every condition you can express here is applied deterministically by this tool."),
+        AIFunctionFactory.Create(
+            dataAccessTools.GetCategoryAsync,
+            "get_category",
+            "Resolve a product category's identity and its comparable characteristics, by name or by id. Use this before searching or comparing by a characteristic you're not sure is spelled/named exactly right in the catalog."),
         AIFunctionFactory.Create(
             dataAccessTools.GetProductDetailsAsync,
             "get_product_details",

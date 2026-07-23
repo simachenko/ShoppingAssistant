@@ -2,6 +2,7 @@ using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using ProductAdvisor.Application;
 using ProductAdvisor.Application.Contracts;
 using ProductAdvisor.Domain;
@@ -17,6 +18,7 @@ builder.AddAdvisorChatClient();
 builder.AddAdvisorHttpClients();
 
 builder.Services.AddScoped<IToolResultCapture, ToolResultCapture>();
+builder.Services.AddScoped<ProductComparisonService>();
 builder.Services.AddScoped<DataAccessTools>();
 builder.Services.AddScoped<ComputeTools>();
 builder.Services.AddScoped<IAdvisorToolCatalog, AdvisorToolCatalog>();
@@ -119,6 +121,67 @@ static async IAsyncEnumerable<SseItem<string>> StreamTurnAsync(
             yield return new SseItem<string>(
                 JsonSerializer.Serialize(ConversationApiMapper.ToResponse(update.Result!), SseJson.Options), "result");
         }
+    }
+}
+
+// POST /api/comparisons — stateless, non-conversational comparison (FR-018, research.md §14):
+// no sessionId, no conversation turn, no LLM tool-selection step. Calls the same shared
+// ProductComparisonService the compare_products MCP tool uses, so results for the same
+// productIds are byte-identical regardless of which path invoked them (SC-010).
+app.MapPost("/api/comparisons", async Task<IResult> (
+    DirectComparisonRequest request,
+    ProductComparisonService comparisonService,
+    IChatClient chatClient,
+    CancellationToken ct) =>
+{
+    Comparison comparison;
+    try
+    {
+        comparison = await comparisonService.CompareAsync(request.ProductIds, ct);
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+    {
+        return Results.BadRequest(ex.Message);
+    }
+
+    var (criteria, rows) = ConversationApiMapper.ToComparisonParts(comparison);
+
+    var explanation = request.IncludeExplanation
+        ? await TryGenerateExplanationAsync(chatClient, criteria, rows, ct)
+        : null;
+
+    return Results.Ok(new DirectComparisonResponse(criteria, rows, explanation));
+});
+
+static async Task<string?> TryGenerateExplanationAsync(
+    IChatClient chatClient, IReadOnlyList<string> criteria, IReadOnlyList<ComparisonRowResponse> rows, CancellationToken ct)
+{
+    // A separate, narrowly-scoped call whose only input is the already-computed table — it can
+    // only narrate, never alter, invent, or omit a value (FR-019). Any failure here (provider
+    // down, timeout, disabled) must never fail the comparison itself, so every exception
+    // collapses to "no explanation" rather than a 5xx (constitution Principle V).
+    try
+    {
+        var payload = JsonSerializer.Serialize(new { criteria, rows });
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, """
+                You summarize an already-computed product comparison table for a shopper. Write a
+                short (2-4 sentence) factual summary of the most notable differences. You MUST NOT
+                invent, alter, recompute, or omit any value from the data given to you — restate
+                only what is present.
+                """),
+            new(ChatRole.User, payload),
+        };
+
+        var response = await chatClient.GetResponseAsync(messages, cancellationToken: ct);
+        return string.IsNullOrWhiteSpace(response.Text) ? null : response.Text;
+    }
+#pragma warning disable CA1031 // Intentional: narration failure must never fail the comparison response (FR-019).
+    catch (Exception)
+#pragma warning restore CA1031
+    {
+        return null;
     }
 }
 

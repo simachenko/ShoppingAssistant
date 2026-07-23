@@ -56,4 +56,41 @@ public sealed class GatewayApiClient(HttpClient httpClient)
             }
         }
     }
+
+    /// <summary>
+    /// Explicit product-picker search (FR-020, contracts/gateway-bff-api.md) — no chat, no
+    /// sessionId, no LLM involvement at all.
+    /// </summary>
+    public async Task<IReadOnlyList<ProductCandidateDto>> SearchProductsAsync(
+        string? category, string? query, decimal? priceMin, decimal? priceMax, string? sortBy,
+        CancellationToken cancellationToken)
+    {
+        var queryString = new List<string>();
+        if (!string.IsNullOrWhiteSpace(category)) queryString.Add($"category={Uri.EscapeDataString(category)}");
+        if (!string.IsNullOrWhiteSpace(query)) queryString.Add($"q={Uri.EscapeDataString(query)}");
+        if (priceMin is not null) queryString.Add($"priceMin={priceMin}");
+        if (priceMax is not null) queryString.Add($"priceMax={priceMax}");
+        if (!string.IsNullOrWhiteSpace(sortBy)) queryString.Add($"sortBy={Uri.EscapeDataString(sortBy)}");
+
+        var uri = "/api/products/search" + (queryString.Count > 0 ? "?" + string.Join('&', queryString) : "");
+        var response = await httpClient.GetAsync(uri, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IReadOnlyList<ProductCandidateDto>>(cancellationToken);
+        return result ?? [];
+    }
+
+    /// <summary>
+    /// Explicit product-picker comparison (FR-018, contracts/gateway-bff-api.md) — a thin proxy
+    /// through the Gateway to Advisor's stateless <c>POST /api/comparisons</c>; byte-identical to
+    /// the same ids compared via chat (SC-010).
+    /// </summary>
+    public async Task<ComparisonResultDto> CompareAsync(
+        IReadOnlyList<Guid> productIds, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.PostAsJsonAsync(
+            "/api/products/compare", new { productIds, includeExplanation = true }, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<ComparisonResultDto>(cancellationToken);
+        return result ?? throw new InvalidOperationException("Gateway returned an empty comparison response.");
+    }
 }

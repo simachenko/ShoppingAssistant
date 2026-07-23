@@ -65,4 +65,16 @@ public sealed class AdvisorApiClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
     }
+
+    /// <summary>
+    /// Thin proxy to <c>POST /api/comparisons</c> (contracts/gateway-bff-api.md) — forwards the
+    /// request body and relays whatever status/body Advisor returned verbatim, so this stays a
+    /// single source of truth for the comparison response contract rather than a second one.
+    /// </summary>
+    public async Task<(int StatusCode, JsonElement Body)> CompareAsync(JsonElement request, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.PostAsJsonAsync("/api/comparisons", request, cancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return ((int)response.StatusCode, body);
+    }
 }

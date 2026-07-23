@@ -26,6 +26,13 @@ public static class ConversationApiMapper
         _ => throw new NotSupportedException($"Unknown turn result type '{result.Type}'."),
     };
 
+    /// <summary>
+    /// Shared by the conversational path above and the direct <c>POST /api/comparisons</c>
+    /// endpoint, so both ever produce the criteria/rows shape the same way (SC-010).
+    /// </summary>
+    public static (IReadOnlyList<string> Criteria, IReadOnlyList<ComparisonRowResponse> Rows) ToComparisonParts(Comparison comparison) =>
+        (comparison.Criteria, comparison.Rows.Select(ToRowResponse).ToList());
+
     public static ConversationSnapshotResponse ToSnapshot(ConversationSession session) => new(
         session.SessionId,
         session.Messages.Select(m => new ConversationMessageResponse(m.Role, m.Text, m.Timestamp)).ToList(),

@@ -46,4 +46,26 @@ public sealed class CatalogClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<CatalogCategoryDto>(cancellationToken);
     }
+
+    /// <summary>Resolves a category by name, case-insensitively (FR-021).</summary>
+    public async Task<CatalogCategoryDto?> GetCategoryByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.GetAsync($"/api/catalog/categories?name={Uri.EscapeDataString(name)}", cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CatalogCategoryDto>(cancellationToken);
+    }
+
+    /// <summary>Parametric search (FR-020) — category/free-text/characteristic filters, pushed to Catalog.</summary>
+    public async Task<CatalogSearchResponse> SearchAdvancedAsync(CatalogSearchRequest request, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.PostAsJsonAsync("/api/catalog/products/search", request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CatalogSearchResponse>(cancellationToken)
+            ?? new CatalogSearchResponse([], request.Page, request.PageSize, 0);
+    }
 }

@@ -90,6 +90,35 @@ public class ConversationSessionTests
     }
 
     [Fact]
+    public void New_session_has_no_last_search_results()
+    {
+        var session = new ConversationSession(Guid.NewGuid());
+
+        Assert.Empty(session.LastSearchResults);
+    }
+
+    [Fact]
+    public void SetLastSearchResults_replaces_rather_than_appends_to_the_prior_set()
+    {
+        var session = new ConversationSession(Guid.NewGuid());
+        var first = new SearchResultReference(Guid.NewGuid(), "Galaxy S24");
+        var second = new SearchResultReference(Guid.NewGuid(), "Pixel 9");
+
+        session.SetLastSearchResults([first]);
+        session.SetLastSearchResults([second]);
+
+        Assert.Equal([second], session.LastSearchResults);
+    }
+
+    [Fact]
+    public void SetLastSearchResults_throws_on_null()
+    {
+        var session = new ConversationSession(Guid.NewGuid());
+
+        Assert.Throws<ArgumentNullException>(() => session.SetLastSearchResults(null!));
+    }
+
+    [Fact]
     public void AddMessage_appends_to_history_in_order()
     {
         var session = new ConversationSession(Guid.NewGuid());

@@ -416,9 +416,9 @@ confirm it resolves against the session's remembered result set.
       `includeExplanation: false` makes zero LLM calls, a failing/unavailable chat client still
       returns `200` with `explanation: null` (FR-019), and fewer than 2 valid ids is a `400` — in
       `tests/ProductAdvisor.Api.Tests/DirectComparisonContractTests.cs`.
-- [ ] T088 [P] Contract test for Gateway `GET /api/products/search` and `POST /api/products/compare`
+- [X] T088 [P] Contract test for Gateway `GET /api/products/search` and `POST /api/products/compare`
       in `tests/Gateway.Api.Tests/ProductSearchAndCompareContractTests.cs`.
-- [ ] T089 [P] Unit test for `ConversationSession.LastSearchResults` being replaced (not appended
+- [X] T089 [P] Unit test for `ConversationSession.LastSearchResults` being replaced (not appended
       to) on each new search/recommendation/comparison in
       `tests/ProductAdvisor.Domain.Tests/ConversationSessionTests.cs`.
 
@@ -444,18 +444,18 @@ confirm it resolves against the session's remembered result set.
       from T094, then an optional separate constrained `IChatClient` call for `explanation` that
       cannot alter the computed data and whose failure never blocks the response — in
       `src/ProductAdvisor/ProductAdvisor.Api/` (depends on T087, T094).
-- [ ] T096 Add `ConversationSession.LastSearchResults` (capped, replaced per new result set) in
+- [X] T096 Add `ConversationSession.LastSearchResults` (capped, replaced per new result set) in
       `src/ProductAdvisor/ProductAdvisor.Domain/` and wire updates into
       `ConversationOrchestrator` whenever `search_products`/`get_recommendations`/
       `compare_products` produces a candidate list (depends on T089).
-- [ ] T097 Implement Gateway `GET /api/products/search` (Catalog search + Pricing price-range
+- [X] T097 Implement Gateway `GET /api/products/search` (Catalog search + Pricing price-range
       filter composition, mirroring `GET /api/products/{productId}`'s existing pattern) and
       `POST /api/products/compare` (proxy to `POST /api/comparisons`) in
       `src/Gateway/Gateway.Api/` (depends on T088, T092, T095).
 - [ ] T098 Implement the Blazor explicit product-picker page — search/filter form, checkbox
       selection, a "Compare" button calling the Gateway's direct endpoints with no chat/LLM
       involvement — in `src/WebApp/WebApp.Blazor/` (depends on T097).
-- [ ] T099 Manually re-verify: (a) chat-based "compare Samsung Galaxy S24 and GooglePixel 9"
+- [X] T099 Manually re-verify: (a) chat-based "compare Samsung Galaxy S24 and GooglePixel 9"
       still resolves via `search_products`/`get_category`/`compare_products`; (b) the explicit
       picker's comparison is byte-identical to the same ids compared via chat; (c) a
       category+price+characteristic-filtered search returns only qualifying products; (d) a

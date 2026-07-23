@@ -66,6 +66,55 @@ public sealed class ProductCatalogService(IProductRepository repository)
         return category is null ? null : ToCategoryDto(category);
     }
 
+    /// <summary>
+    /// Parametric search (FR-020): category/free-text narrowing is pushed to SQL
+    /// (<see cref="IProductRepository.SearchAllAsync"/>); characteristic filters are then
+    /// evaluated in-process on that already-narrowed set (research.md §13) before this method
+    /// paginates the final, filtered result — pagination MUST apply after filtering, not before,
+    /// or a later page could silently miss matches that were excluded by an earlier page's cut.
+    /// </summary>
+    public async Task<PagedResult<ProductSummaryDto>> SearchProductsAdvancedAsync(
+        ProductSearchRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Page < 1)
+            throw new ArgumentOutOfRangeException(nameof(request), "Page must be >= 1.");
+        if (request.PageSize is < 1 or > MaxPageSize)
+            throw new ArgumentOutOfRangeException(nameof(request), $"PageSize must be between 1 and {MaxPageSize}.");
+
+        var characteristics = request.Characteristics ?? [];
+        foreach (var filter in characteristics)
+        {
+            if (filter.Operator == CharacteristicFilterOperator.Between && filter.ValueTo is null)
+            {
+                throw new ArgumentException(
+                    $"Characteristic filter '{filter.Key}' uses operator 'between' and requires valueTo.", nameof(request));
+            }
+        }
+
+        var candidates = await repository.SearchAllAsync(
+            request.CategoryId, request.Category, request.Query, cancellationToken);
+
+        var filtered = characteristics.Count == 0
+            ? candidates
+            : candidates.Where(p => CharacteristicFilterMatcher.MatchesAll(p, characteristics)).ToList();
+
+        var totalCount = filtered.Count;
+        var pageItems = filtered.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).ToList();
+
+        var brandIds = pageItems.Select(p => p.BrandId).Distinct().ToArray();
+        var categoryIds = pageItems.Select(p => p.CategoryId).Distinct().ToArray();
+        var brands = await repository.GetBrandsAsync(brandIds, cancellationToken);
+        var categories = await repository.GetCategoriesAsync(categoryIds, cancellationToken);
+
+        var summaries = pageItems
+            .Select(p => ToSummary(p, brands.GetValueOrDefault(p.BrandId)?.Name ?? "", categories.GetValueOrDefault(p.CategoryId)?.Name ?? ""))
+            .ToList();
+
+        return new PagedResult<ProductSummaryDto>(summaries, request.Page, request.PageSize, totalCount);
+    }
+
     private static ProductSummaryDto ToSummary(Product product, string brandName, string categoryName) =>
         new(product.ProductId, product.Name, brandName, categoryName, product.CategoryId,
             product.Specifications.Select(ToSpecDto).ToList());
