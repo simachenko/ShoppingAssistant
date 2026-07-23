@@ -38,6 +38,7 @@ A shopper asks to compare two or more specific products (or is offered multiple 
 
 1. **Given** a user names two specific products, **When** the advisor compares them, **Then** the response lists both products against the same criteria (e.g., price, camera, battery, availability) in the same order.
 2. **Given** one of the compared products has a characteristic that cannot be verified from product data, **When** the advisor compares them, **Then** it explicitly marks that value as unavailable/unverified rather than omitting it silently or guessing.
+3. **Given** a known set of two or more product identifiers (e.g., selected explicitly rather than named in a chat message), **When** a comparison is requested directly for that set, **Then** the resulting ratings, deltas, and criteria are identical to what a conversational request for the same products would produce — the comparison computation does not depend on the language model deciding to run it.
 
 ---
 
@@ -65,6 +66,9 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - What happens when the user changes a previously stated constraint mid-conversation (e.g., raises the budget)? The advisor MUST apply the updated constraint going forward and treat earlier recommendations as superseded.
 - What happens when the user asks about a product category the retailer does not carry at all? The advisor MUST state that it isn't available rather than comparing or recommending unrelated items.
 - What happens if the connection to the advisor is interrupted partway through a response, or the underlying language model doesn't support progressive delivery? The user MUST still end up with the complete response (falling back to delivering it all at once) rather than being left with a truncated, stuck, or silently failed answer.
+- What happens when a follow-up reference to previously shown products ("the first two", "the cheaper one") is made with no prior search, recommendation, or comparison in the session? The advisor MUST ask which products are meant rather than guessing an identifier.
+- What happens when a characteristic filter names an attribute that isn't defined for the category being searched? The system MUST treat it as zero matches for that condition rather than silently ignoring the filter.
+- What happens when a price range filter would exclude every candidate that otherwise matches the category and characteristics? The system MUST still apply the price filter and report the honest "no match" outcome rather than relaxing it to "be helpful."
 
 ## Requirements *(mandatory)*
 
@@ -87,14 +91,20 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **FR-015**: The advisor's response MUST be delivered to the user progressively as it is generated, rather than only after the entire response is complete, so the user sees the answer forming instead of facing a blank wait on longer responses.
 - **FR-016**: The advisor's explanatory text MUST use structured formatting (e.g., headings, emphasis, bullet lists) rather than a single dense paragraph, so key facts are easy to scan.
 - **FR-017**: Recommendation and comparison data (specifications, matched requirements, trade-offs, comparison criteria) MUST be presented as structured lists/tables rather than only as prose, so the user can visually distinguish and compare product characteristics at a glance.
+- **FR-018**: The system MUST expose a way to compute a product comparison — including rankings, ratings, and per-criterion deltas — directly from a known set of product identifiers, independent of whether a conversational exchange with the language model triggers it; the computation MUST be deterministic and MUST NOT differ depending on which path invoked it.
+- **FR-019**: Whenever a comparison, recommendation, or search result includes a narrative explanation, that explanation MUST be produced by the language model strictly as commentary on already-computed values; it MUST NOT be able to alter, invent, or omit any value in the accompanying structured data, and its absence (e.g., if the language model is unavailable) MUST NOT prevent the structured data itself from being returned.
+- **FR-020**: The system MUST support searching for products using explicit, structured filters — category, price range, and one or more product-characteristic conditions (e.g., a minimum camera resolution) — with results limited to products that satisfy every stated filter.
+- **FR-021**: The system MUST allow resolving a product category's identity and its comparable characteristics by name, so a category reference can be grounded to a concrete identifier without the language model guessing one.
+- **FR-022**: The advisor MUST retain the most recent set of product identifiers shown to the user (from a search, recommendation, or comparison) within the conversation session, so a follow-up reference to that set (e.g., "the first two", "the cheaper one") resolves against known identifiers rather than requiring the language model to reconstruct them from prior prose.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Product**: A catalog item the advisor can recommend, compare, or answer questions about — category, name/model, specifications, price, currency, and current availability/stock status.
 - **User Need**: The parsed representation of what the shopper is looking for — product category, budget (amount and currency), required or preferred features, and any other explicit constraints.
 - **Recommendation**: One or more suggested products tied to a User Need, each carrying the matched requirements, disclosed trade-offs, and any verification notes.
-- **Comparison**: A set of two or more products evaluated against one shared list of criteria, with each product's value recorded for every criterion.
+- **Comparison**: A set of two or more products evaluated against one shared list of criteria, with each product's value recorded for every criterion. Reachable both through conversation and through direct invocation with a known product set; both paths produce identical results because both call the same deterministic computation.
 - **Clarification Question**: A single focused question raised when essential information is missing, tied to the specific missing piece of the User Need.
+- **Search Filter**: A structured description of what a product search must satisfy — category, free-text keywords, a price range, and zero or more characteristic conditions (attribute name, comparison operator, value) — evaluated deterministically; never inferred or approximated by the language model.
 
 ## Success Criteria *(mandatory)*
 
@@ -109,6 +119,9 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **SC-007**: For a fully specified request, a user can go from initial request to a final recommendation — including any single clarification round — within one conversational exchange.
 - **SC-008**: For responses that take more than a couple of seconds to fully generate, the user sees the first part of the advisor's answer begin appearing within 3 seconds, rather than waiting for the entire response before seeing anything.
 - **SC-009**: 100% of recommendation and comparison responses present specifications, matched requirements, trade-offs, and comparison criteria as visually distinct list/table elements rather than as a single block of prose text.
+- **SC-010**: Comparing the same set of products twice — once triggered through conversation and once invoked directly — yields byte-identical ratings, deltas, and rankings, proving the computation does not depend on the language model or on which path invoked it.
+- **SC-011**: 100% of products returned by a filtered search satisfy every stated filter condition (category, price range, and characteristic conditions) — zero results violate a stated filter.
+- **SC-012**: When a session has a prior search, recommendation, or comparison result, 100% of ordinal follow-up references ("the first one", "the cheaper of the two") resolve to the correct previously-shown product.
 
 ## Assumptions
 
@@ -120,3 +133,6 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - Currency and units follow whatever the user specifies (e.g., UAH); no currency conversion is assumed unless the user requests it.
 - Progressive delivery (FR-015) applies to the advisor's own explanatory text; the structured facts within a response (prices, specifications, matched requirements, comparison values) are only ever shown once fully known and verified — a fact is never displayed as a partial/guessed value while streaming, only the narration around it appears incrementally.
 - Rich formatting (FR-016/FR-017) is a presentation concern: it changes how already-grounded data and text are displayed, not what data is shown. It never introduces a fact or number that didn't already come from an approved source.
+- Characteristic filter conditions (FR-020) support equality, greater-than-or-equal, less-than-or-equal, and a numeric range; this covers the catalog's existing numeric and simple categorical attributes without introducing a general-purpose query language.
+- The session's memory of prior search/recommendation/comparison results (FR-022) holds only the most recently shown set, not a full history of every result ever shown in the conversation.
+- Explanatory narration attached to a directly-invoked comparison (FR-018/FR-019) is optional and best-effort: if it cannot be produced, the comparison's structured data is still returned in full rather than withholding the whole response.

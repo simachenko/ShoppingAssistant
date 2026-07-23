@@ -13,24 +13,64 @@ it.
 ## Tool: `search_products`
 
 **Description (as advertised to the LLM)**: "Search the retailer's catalog for products in a
-category, optionally matching a free-text query. Returns product identity and specifications
-only — no price, stock, rating, or comparison."
+category, optionally matching a free-text query, a price range, and structured characteristic
+conditions (e.g., camera resolution at least 48 MP). Returns product identity, specifications,
+and — when a price range is given — verified price/availability. Do not filter, sort, or rank
+the results yourself; every condition you can express here is applied deterministically by this
+tool."
 
-**Input schema**:
+**Input schema** (FR-020, research.md §13 — new fields are all optional and additive; existing
+callers passing only `category`/`query` are unaffected):
 
 ```json
 {
   "type": "object",
   "properties": {
-    "category": { "type": "string", "description": "Product category, e.g. 'smartphones'" },
-    "query": { "type": "string", "description": "Optional free-text keywords" }
-  },
-  "required": ["category"]
+    "category": { "type": "string", "description": "Product category name, e.g. 'Smartphones'" },
+    "categoryId": { "type": "string", "description": "Category id, if already known (e.g. from get_category)" },
+    "query": { "type": "string", "description": "Optional free-text keywords" },
+    "characteristics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "description": "Specification key, e.g. 'camera_mp'" },
+          "operator": { "type": "string", "enum": ["eq", "gte", "lte", "between"] },
+          "value": { "type": "string" },
+          "valueTo": { "type": "string", "description": "Required only when operator is 'between'" }
+        },
+        "required": ["key", "operator", "value"]
+      }
+    },
+    "priceMin": { "type": "number" },
+    "priceMax": { "type": "number" },
+    "sortBy": { "type": "string", "enum": ["price_asc", "price_desc", "name"] },
+    "limit": { "type": "integer", "description": "Max results to return, e.g. 10 for 'top 10 phones'" }
+  }
 }
 ```
 
-**Output**: JSON array of `{ productId, name, brand, specifications[] }` — mirrors
-`catalog-api.md`'s search response `items`.
+**Output**: JSON array of `{ productId, name, brand, specifications[], price?, priceVerified?,
+availability?, availabilityVerified? }` — mirrors `catalog-api.md`'s search response `items`,
+extended with price/availability fields (present only when `priceMin`/`priceMax`/`sortBy` was
+given, since that's what triggers the Pricing composition step below).
+
+**Composition (research.md §13)**: when `priceMin`/`priceMax`/`sortBy`/`limit` is present, the
+tool handler calls Catalog's `POST /api/catalog/products/search` (category + `characteristics`,
+narrowed server-side) to get candidate ids, then batch-fetches their offers from Pricing, filters
+by price range, sorts, and limits — entirely inside the tool handler, never visible to or
+performed by the LLM.
+
+## Tool: `get_category`
+
+**Description (as advertised to the LLM)**: "Resolve a product category's identity and its
+comparable characteristics, by name or by id. Use this before searching or comparing by a
+characteristic you're not sure is spelled/named exactly right in the catalog."
+
+**Input schema**: `{ "name": "string?", "categoryId": "string?" }` — at least one required.
+
+**Output**: `{ found: true, categoryId, name, comparableAttributeKeys[] }` or `{ found: false }` —
+mirrors `GET /api/catalog/categories?name=` / `GET /api/catalog/categories/{id}` (FR-021).
 
 ## Tool: `get_product_details`
 
@@ -112,6 +152,14 @@ row) and `rows[]`, each with `candidate`, `valuesByCriterion`, deterministic `ra
 `deltasVsBest`. Internally calls `get_product_details` + `check_price_and_availability` for
 each id and runs `ComparisonEngine` — again, entirely inside the tool handler.
 
+**Not the only way to reach this computation (FR-018, research.md §14)**: this tool handler and
+the stateless `POST /api/comparisons` endpoint (`advisor-conversation-api.md`) both call the same
+shared comparison-composition service — comparing the same product-id set through either path
+yields byte-identical `rating`/`deltasVsBest` (SC-010). Use this tool when ids need to be
+resolved from conversation first (e.g., via `search_products`/`get_category`); call
+`POST /api/comparisons` directly when the ids are already known (e.g., an explicit product picker
+with no chat involved).
+
 ## Tool contract test expectations
 
 - Each tool's declared JSON schema is validated against the MCP tool-list response (schema
@@ -132,3 +180,12 @@ each id and runs `ComparisonEngine` — again, entirely inside the tool handler.
 - A separate `ProductAdvisor.Application.Tests` suite stubs all five tools and asserts the
   orchestration loop never produces a `score`, `rating`, or `delta` value on its own — every
   number in its output can be traced back to a stubbed tool response.
+- `get_category` resolves a known category by name and by id, and returns `{ found: false }` for
+  an unknown one — never a fabricated category.
+- `search_products` called with a `characteristics` condition returns only products satisfying
+  that condition (SC-011); called with `priceMin`/`priceMax` returns only products whose verified
+  price falls in range, and each returned item's `price`/`availability` matches what
+  `check_price_and_availability` would independently report for the same id.
+- `compare_products` (tool) and `POST /api/comparisons` (direct endpoint) are called with the
+  same product-id set in the same test and asserted to return byte-for-byte identical `rating`/
+  `deltasVsBest` values (SC-010) — the two entry points are not two independent implementations.

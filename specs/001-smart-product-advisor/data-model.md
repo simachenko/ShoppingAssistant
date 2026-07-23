@@ -49,6 +49,25 @@ fetched at request time (marked *(reference only)* below).
 **Relationships**: `Product` → `Category` (many-to-one), `Product` → `Brand` (many-to-one),
 `Product` *(owns)* → `Specification` (one-to-many, value objects).
 
+### CharacteristicFilter (value object, request-only — not persisted)
+
+| Field | Type | Notes |
+|---|---|---|
+| `Key` | string | Specification key to filter on, e.g. `"camera_mp"` |
+| `Operator` | enum | `Equals`, `GreaterThanOrEqual`, `LessThanOrEqual`, `Between` |
+| `Value` | string | Comparison value; parsed numerically when the operator is ordinal |
+| `ValueTo` | string? | Required only when `Operator = Between`, the upper bound |
+
+**Validation rules**: `ValueTo` MUST be present when `Operator = Between` and MUST be absent
+otherwise. A `Key` that doesn't exist for any product in the searched scope yields zero matches
+for that condition (spec.md edge case), not a validation error — an unknown attribute is a valid,
+just unsatisfiable, filter.
+
+**Evaluation**: applied in `ProductCatalog.Application` in-process, after category/free-text
+filtering has already narrowed the row set via SQL (research.md §13) — `Specification` is stored
+as a JSON document per product, which doesn't push cleanly into arbitrary per-operator SQL
+predicates via EF Core's LINQ provider at this catalog's scale.
+
 ---
 
 ## Pricing and Availability Service
@@ -100,6 +119,7 @@ request.
 | `CurrentRequirement` | UserRequirement (value object) | The latest known snapshot of what the user wants — persists across turns until changed |
 | `PendingClarification` | ClarificationQuestion? | Set when essential info is missing; cleared once answered |
 | `LastRecommendation` | Recommendation? | The most recent recommendation set produced, for follow-up questions (US3) |
+| `LastSearchResults` | `List<SearchResultReference>` | The most recently shown search/recommendation/comparison candidates (id + name only) — lets an ordinal follow-up ("the first two", "the cheaper one") resolve to concrete ids (FR-022) instead of requiring the LLM to reconstruct them from prior prose. Replaced, never appended to, each time a new result set is produced — bounded, not a full history. |
 
 Streaming (research.md §11) is a transport/presentation concern only — a `ConversationMessage`
 always stores the complete, final assistant text once a turn ends, never a partial fragment.
@@ -135,6 +155,13 @@ both non-null (constitution/spec "essential information" bar); otherwise a
 
 **Validation rule**: Only one `ClarificationQuestion` may be pending at a time (FR-003 — one
 focused question, not a list).
+
+### SearchResultReference (value object, part of `ConversationSession.LastSearchResults`)
+
+| Field | Type | Notes |
+|---|---|---|
+| `ProductId` | Guid | *(reference only)* |
+| `Name` | string | Display name only, for resolving an ordinal reference back to an id — no specs/price/availability are cached here; a follow-up that needs those re-fetches them fresh (research.md §15) |
 
 ### ProductCandidate (value object, *not persisted* — assembled per request from Catalog + Pricing HTTP responses)
 
@@ -177,8 +204,13 @@ and lets the LLM narrate it.
 | `Criteria` | `List<string>` | The shared, ordered attribute list (sourced from `Category.ComparableAttributeKeys`) — identical for every product in the set (FR-006/SC-002) |
 | `Rows` | `List<ComparisonRow>` | One per compared product |
 
-Produced **only** by the `compare_products` tool handler; like `Recommendation`, the
-orchestration loop just stores and relays it.
+Produced **only** by one shared comparison-composition service inside
+`ProductAdvisor.Infrastructure` (research.md §14), called from **two** entry points: the
+conversational `compare_products` tool handler, and a new stateless `POST /api/comparisons`
+endpoint that takes a known product-id set directly with no conversation turn at all (FR-018).
+Both paths call the identical code, so results for the same product-id set are byte-identical
+regardless of which one triggered it (SC-010) — the orchestration loop, in the conversational
+case, just stores and relays whatever the shared service returned; it never constructs one.
 
 ### ComparisonRow (value object)
 
@@ -204,10 +236,26 @@ Pure function: `(IEnumerable<ProductCandidate>, List<string> criteria) → Compa
 `ValuesByCriterion`, the deterministic `Rating` per row, and `DeltasVsBest` per row. No I/O, no
 LLM call — unit-tested with fixed candidate sets so rating/delta output is asserted to be
 identical across repeated calls (proving no non-determinism sneaks in). Called exclusively by
-the `compare_products` tool's handler; never called directly by the orchestration loop.
+the shared comparison-composition service in `ProductAdvisor.Infrastructure` (research.md §14),
+which both the `compare_products` tool handler and the direct `POST /api/comparisons` endpoint
+call — never called directly by the orchestration loop, and never re-implemented a second time
+for the direct-endpoint path.
+
+### Optional comparison explanation (produced only by `POST /api/comparisons`, FR-019)
+
+When `POST /api/comparisons` is called with `includeExplanation: true` (the default), a second,
+narrowly-scoped LLM call — separate from the computation above — receives only the already-built
+`Comparison` and returns a short narrative summary. It cannot see or influence
+`ValuesByCriterion`/`Rating`/`DeltasVsBest`; if the call fails or is disabled, the response's
+`explanation` field is `null` and the `comparison` data is still returned in full (constitution
+Principle V — narration's absence never blocks the structured result).
 
 **Relationships**: `ConversationSession` *(owns)* `UserRequirement`, `ClarificationQuestion?`,
-`Recommendation?`; `Recommendation` *(owns)* `RecommendedItem`s, each holding a `ProductCandidate`
-(itself an in-memory join of Catalog + Pricing data, never persisted as a duplicate table).
-`ScoringPolicy` and `ComparisonEngine` are domain services with exactly one caller each — their
-owning tool handler — never the `ProductAdvisor.Application` conversation loop.
+`Recommendation?`, `LastSearchResults` (`List<SearchResultReference>`); `Recommendation` *(owns)*
+`RecommendedItem`s, each holding a `ProductCandidate` (itself an in-memory join of Catalog +
+Pricing data, never persisted as a duplicate table). `ScoringPolicy` is a domain service with
+exactly one caller — the `get_recommendations` tool handler. `ComparisonEngine` is a domain
+service with exactly one caller — the shared comparison-composition service in
+`ProductAdvisor.Infrastructure` (research.md §14) — which is itself called from two places
+(`compare_products` tool handler, `POST /api/comparisons`). Neither domain service is ever called
+directly by the `ProductAdvisor.Application` conversation loop.

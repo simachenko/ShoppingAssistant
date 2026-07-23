@@ -73,6 +73,18 @@ app.MapGet("/api/catalog/categories/{categoryId:guid}", async (
     return category is null ? Results.NotFound() : Results.Ok(category);
 });
 
+// GET /api/catalog/categories?name= — resolve a category by name, case-insensitively (FR-021, contracts/catalog-api.md)
+app.MapGet("/api/catalog/categories", async (string? name, ProductCatalogService service, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(name))
+    {
+        return Results.BadRequest("name is required.");
+    }
+
+    var category = await service.GetCategoryByNameAsync(name, ct);
+    return category is null ? Results.NotFound() : Results.Ok(category);
+});
+
 app.Run();
 
 public partial class Program;

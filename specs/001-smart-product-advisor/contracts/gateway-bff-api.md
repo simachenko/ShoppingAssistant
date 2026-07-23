@@ -48,6 +48,39 @@ merges them into one response shaped like a `ProductCandidate` (see data-model.m
 the response is still `200` with `priceVerified: false` / `availabilityVerified: false` —
 partial success, not total failure.
 
+## GET /api/products/search
+
+Composition endpoint for the explicit product-picker UI (FR-020) — **no chat, no LLM
+involvement at all**: calls Catalog's `POST /api/catalog/products/search` (category, free-text,
+characteristics) to get candidates, then batch-fetches their offers from Pricing and
+filters/sorts/limits by price range on that candidate set (the same pushdown-composition pattern
+as `GET /api/products/{productId}` above, applied to a list instead of one item — research.md
+§13).
+
+**Request** (query string, mirroring the Catalog request body as query parameters): `category`,
+`categoryId`, `q`, `characteristics` (repeated `key:operator:value[:valueTo]` entries),
+`priceMin`, `priceMax`, `sortBy`, `page`, `pageSize`.
+
+**Response 200**: array of `ProductCandidate`-shaped items (data-model.md) — same merge shape as
+`GET /api/products/{productId}`, just for a list. A candidate whose price couldn't be verified
+still appears, with `priceVerified: false`, rather than being silently dropped (constitution
+Principle V, consistent with the single-product endpoint above).
+
+**Errors**: `400` for an unrecognized characteristic `operator`, mirroring Catalog's own
+validation.
+
+## POST /api/products/compare
+
+Composition endpoint over the Advisor's stateless comparison endpoint (FR-018) — passthrough
+proxy to `POST /api/comparisons` on `ProductAdvisor.Api`, no reshaping (same principle as the
+chat composition endpoints above: one source of truth for the response contract). This is what
+the explicit product-picker's "Compare" button calls; it never touches `/api/chat/*` or any
+`sessionId`.
+
+**Request**: identical to `POST /api/comparisons` (`advisor-conversation-api.md`).
+
+**Response 200**: identical to `POST /api/comparisons`'s response.
+
 ## Contract test expectations
 
 - `X-Correlation-Id` is present on every downstream call the Gateway makes (asserted via a
@@ -61,3 +94,8 @@ partial success, not total failure.
   event.
 - The Gateway's streamed `result` event, once `sessionId` is stripped back out, is
   byte-identical to what `POST /api/chat/messages` returns for the same underlying turn.
+- `GET /api/products/search` with a `characteristics` condition and a `priceMin`/`priceMax` range
+  returns only candidates satisfying both (SC-011), with unverified price handled the same
+  partial-success way as `GET /api/products/{productId}`.
+- `POST /api/products/compare` proxies `POST /api/comparisons` without reshaping — its response
+  is byte-identical to calling the Advisor endpoint directly for the same request.

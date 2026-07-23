@@ -59,6 +59,13 @@ public sealed class ProductCatalogService(IProductRepository repository)
         return category is null ? null : ToCategoryDto(category);
     }
 
+    /// <summary>Resolves a category's identity and comparable characteristics by name (FR-021).</summary>
+    public async Task<CategoryDto?> GetCategoryByNameAsync(string name, CancellationToken cancellationToken)
+    {
+        var category = await repository.FindCategoryByNameAsync(name, cancellationToken);
+        return category is null ? null : ToCategoryDto(category);
+    }
+
     private static ProductSummaryDto ToSummary(Product product, string brandName, string categoryName) =>
         new(product.ProductId, product.Name, brandName, categoryName, product.CategoryId,
             product.Specifications.Select(ToSpecDto).ToList());

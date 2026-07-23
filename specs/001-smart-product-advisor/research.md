@@ -309,3 +309,121 @@ determinism than our own Razor markup. (b) A client-side JS Markdown library (e.
 instead of Markdig — rejected to keep the Blazor Server app's logic server-side and in C#,
 consistent with not shipping business/formatting logic to the browser; also avoids a second
 sanitization surface (JS-side) to maintain.
+
+## 13. Deterministic parametric search and category/characteristics resolution (FR-020/FR-021/SC-011)
+
+**Decision**: Product search accepts explicit, structured filters instead of relying on the LLM
+to infer the right free-text query:
+
+- **Category**: resolvable by id (existing) or by name (`GET /api/catalog/categories?name=`,
+  reusing the already-implemented `FindCategoryByNameAsync` repository method), matched
+  case-insensitively — the LLM (or any caller) grounds a category reference to a concrete id
+  instead of guessing one.
+- **Characteristics**: a small filter DSL — `{ key, operator, value, valueTo? }` with
+  `operator ∈ { eq, gte, lte, between }` — covers the catalog's existing numeric (`camera_mp`,
+  `battery_mah`, ...) and simple categorical (`noise_cancelling`) attributes without building a
+  general-purpose query language.
+- **Price range**: Catalog has no price data (bounded-context isolation, data-model.md), so a
+  price filter cannot be pushed into Catalog's query. It is applied by whichever service composes
+  Catalog + Pricing (the Advisor's search tool, or the Gateway's picker-facing endpoint): fetch
+  the category/characteristics-narrowed candidate ids from Catalog first, batch-fetch their
+  offers from Pricing, then filter/sort/limit by price on that already-small candidate set. This
+  is the same "pushdown filter composition" pattern already used for cross-service data joins in
+  this system (data-model.md's `ProductCandidate` assembly) — no new Pricing endpoint or query
+  parameter is introduced.
+- **Implementation boundary, stated explicitly**: `Product.Specifications` is stored as a JSON
+  document per product (`OwnsMany(...).ToJson()`, `ProductConfiguration.cs`), which does not
+  translate cleanly into arbitrary per-operator SQL predicates via EF Core's LINQ provider.
+  Characteristic filtering is therefore applied **in Catalog's application layer, in-process,
+  after** category/free-text narrowing has already reduced the row set via an indexed SQL
+  predicate — not against the full, unfiltered catalog. This is an explicit, documented scale
+  boundary appropriate to plan.md's Scale/Scope (hundreds to low thousands of products per
+  category), not an oversight.
+
+**Rationale**: Keeps the LLM out of the filtering/ranking arithmetic entirely (constitution
+Principle II) while still letting it do the thing language models are legitimately good at —
+mapping a natural-language ask ("phones under 25,000 UAH with a great camera") onto these
+structured parameters. Reusing the existing pushdown-composition pattern for price avoids
+inventing a second cross-service query mechanism.
+
+**Alternatives considered**: (a) Postgres trigram search (`pg_trgm`) for fuzzier free-text
+matching — a recognized, right-sized upgrade for this catalog's scale (see the "GooglePixel 9" /
+"Samsung Galaxy S24" free-text matching fix already shipped for `search_products`'s `query`
+parameter, which currently uses token-overlap + whitespace-stripped substring matching instead).
+Documented here as the natural next step if free-text matching needs to get fuzzier (typo
+tolerance), but not implemented now — it needs an extension + index + threshold-tuning pass that
+isn't justified by the current dataset size. (b) A semantic/vector index over product
+descriptions — rejected as disproportionate for a catalog of this size; it trades a determinism
+problem for an embedding-model dependency and new infrastructure, solving a scale problem this
+system doesn't have yet. (c) A CQRS read-model / dedicated search index (Elasticsearch/OpenSearch
+-style), fed by Catalog/Pricing domain events — this is the textbook **correct** pattern at real
+retail scale (unifying category + characteristics + price + availability into one filterable,
+sortable, denormalized view, avoiding the pushdown-composition round trips entirely) and is
+recorded here so the boundary is a conscious choice; not built for this feature because it
+requires an event bus and a new service that plan.md's Scale/Scope doesn't justify for a
+demonstration project.
+
+## 14. Direct (non-conversational) comparison invocation (FR-018/FR-019/SC-010)
+
+**Decision**: The deterministic comparison computation (`ComparisonEngine`, candidate assembly
+from Catalog + Pricing) is factored into one shared service inside `ProductAdvisor.Infrastructure`
+that is called from **two** entry points that must never drift apart:
+
+1. The existing `compare_products` MCP tool (conversational; the LLM supplies the product ids,
+   usually resolved moments earlier via `search_products`/`get_category`).
+2. A new stateless `POST /api/comparisons` endpoint on `ProductAdvisor.Api` that takes a product-id
+   set directly — no `sessionId`, no conversation turn, no LLM tool-selection step at all. This is
+   what an explicit "pick products, click Compare" UI calls.
+
+Both paths produce the `Comparison` shape from data-model.md, and because both call the identical
+composition code, results for the same product-id set are byte-identical regardless of path
+(SC-010) — this is asserted directly by a contract test, not just claimed.
+
+`POST /api/comparisons` accepts an optional `includeExplanation` flag (default `true`). When set,
+a **separate**, narrowly-scoped `IChatClient` call is made whose only input is the already-computed
+`Comparison` and whose system prompt instructs it to summarize, never invent, alter, or omit a
+value. If that call fails or is disabled, `explanation` is `null` and the (already fully computed)
+`comparison` data is still returned in full — constitution Principle V's "honest partial response"
+applied to this endpoint specifically, and FR-019's requirement that narration's absence never
+blocks the structured result.
+
+**Rationale**: Directly answers the concern that motivated this revision — comparison math must
+never depend on the LLM choosing to invoke it correctly or on the LLM being available at all. It
+also keeps `compare_products` (useful for MCP-standard clients and the conversational flow) rather
+than removing it, since resolving "compare the Galaxy S24 and the Pixel 9" from prose into ids is
+still a legitimate, retrieval-flavored job for the LLM+search tools — only the arithmetic moves
+outside the conversation entirely.
+
+**Alternatives considered**: (a) Remove `compare_products` and force all comparison through the
+direct endpoint, requiring the UI/Gateway to resolve product names before calling it — rejected;
+it would break the natural conversational "compare X and Y" flow, which is still valuable and,
+per §1's tool-boundary rule, was never the source of incorrect math to begin with (only the
+resolution-to-ids step was previously fragile, and that's fixed independently — see the free-text
+`search_products` matching fix). (b) Generate the explanation inline as part of the same call that
+computes the comparison (single LLM+compute pass) — rejected in favor of two clearly separated
+calls, so the deterministic computation can be measured, tested, and consumed (SC-010) completely
+independently of whether narration succeeds, fails, or is even requested.
+
+## 15. Session memory of prior search/recommendation/comparison results (FR-022/SC-012)
+
+**Decision**: `ConversationSession` gains `LastSearchResults: IReadOnlyList<SearchResultReference>`
+(`ProductId` + `Name` only — not full specs/pricing, which are re-fetched when actually needed),
+set whenever `search_products`, `get_recommendations`, or `compare_products` produces a candidate
+list, and **replaced** (not appended to) on every new one. This gives the orchestrator a single,
+consistent, bounded place to resolve an ordinal follow-up ("the first two", "the cheaper one")
+against concrete product ids before calling `compare_products`/`get_product_details` — the LLM
+still does the (legitimate) language-understanding work of matching "the cheaper one" to a
+position in the list, but the list itself is exact, not reconstructed from prior prose.
+
+**Rationale**: Generalizes the pattern `ConversationSession.LastRecommendation` already
+established for US3 follow-ups, rather than adding a second, parallel memory field with different
+semantics. Capping to the single most recent result (not a history) keeps session storage bounded
+regardless of how long a conversation runs.
+
+**Alternatives considered**: (a) Keep relying on the LLM re-reading the conversation transcript to
+recover which products were shown — rejected; it's exactly the reliability gap this whole revision
+exists to close, and degrades further as a conversation gets longer. (b) Store the full
+`ProductCandidate`/`ComparisonRow` objects (specs, price, availability) in session memory instead
+of just id+name — rejected as unnecessary duplication of data Catalog/Pricing already own and
+that can go stale; a follow-up that needs a full detail re-fetches it fresh, which also means the
+answer reflects current price/availability, not what was true when the list was first shown.

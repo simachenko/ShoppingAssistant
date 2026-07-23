@@ -88,7 +88,8 @@ order independent of the narration text.
 A `null` value in `values` means that criterion could not be verified for that product
 (FR-005) — the UI renders this distinctly from a real "0"/empty value, never omits it.
 `rating` and `deltasVsBest` are the deterministic `compare_products` output — never computed by
-the conversation API layer or the LLM.
+the conversation API layer or the LLM. The same `criteria`/`rows` are also reachable outside any
+conversation via `POST /api/comparisons` below (FR-018) — both paths call the same computation.
 
 **Errors**: `404` unknown `sessionId`; `400` empty message text; `503` (with a body explaining
 the degraded state) if the LLM provider and/or both upstream services are unreachable after
@@ -132,6 +133,54 @@ stream starts (`404`/`400`); once the stream has started, failures are communica
 the stream without a `result` event rather than an HTTP error status (the headers are already
 committed).
 
+## POST /api/comparisons
+
+**Stateless, non-conversational** (FR-018, research.md §14): computes a product comparison
+directly from a known product-id set — no `sessionId`, no conversation turn, no LLM
+tool-selection step. This is what an explicit product-picker UI calls, and what proves the
+comparison computation doesn't depend on the language model (SC-010): calling this with the same
+`productIds` that a chat message would resolve to yields byte-identical `criteria`/`rows`.
+
+**Request**:
+
+```json
+{ "productIds": ["guid", "guid"], "includeExplanation": true }
+```
+
+`includeExplanation` defaults to `true`. `productIds` requires 2–10 entries, same as
+`compare_products` (`advisor-mcp-tools.md`).
+
+**Response 200**:
+
+```json
+{
+  "criteria": ["price", "camera_mp", "battery_mah", "availability"],
+  "rows": [
+    {
+      "productId": "guid",
+      "name": "string",
+      "values": { "price": "14500 UAH", "camera_mp": "50", "battery_mah": null, "availability": "InStock" },
+      "rating": 8.2,
+      "deltasVsBest": { "price": "+1500 UAH vs cheapest", "camera_mp": "best in set", "battery_mah": "not verified" }
+    }
+  ],
+  "explanation": "string | null"
+}
+```
+
+`criteria`/`rows` are produced by the same shared comparison-composition service the
+conversational `compare_products` path uses (research.md §14) — never recomputed or reshaped
+here. `explanation`, when requested, comes from a **separate**, narrowly-scoped LLM call whose
+only input is the `criteria`/`rows` above and whose instructions forbid introducing, altering, or
+omitting a value (FR-019); if that call fails, is disabled, or times out, `explanation` is `null`
+and `criteria`/`rows` are still returned in full — the comparison itself never depends on the
+explanation succeeding.
+
+**Errors**: `400` fewer than 2 or more than 10 `productIds`, or fewer than 2 of the given ids
+resolve to a real product (nothing to compare). Unlike the conversational endpoints, this one
+never returns `503` for an LLM-provider outage — the deterministic comparison has no LLM
+dependency; only `explanation` can come back `null` because of one.
+
 ## GET /api/conversations/{sessionId}
 
 **Response 200**: full transcript + `currentRequirement` snapshot (category, budget, required
@@ -161,3 +210,13 @@ that constraints persisted correctly across turns (FR-011).
   delivery.
 - A stream that's forcibly cut before its `result` event is asserted to be detectable as
   incomplete by the client (no silent "it just ended normally" false-positive).
+- `POST /api/comparisons` and a conversational message that resolves to the same `productIds`
+  (via a scripted/stubbed chat client calling `compare_products`) return byte-identical
+  `criteria`/`rows` (SC-010) — asserted in the same test, not just separately.
+- `POST /api/comparisons` with `includeExplanation: false` returns `explanation: null` without
+  making any LLM call at all (asserted via a chat-client spy that records zero invocations).
+- `POST /api/comparisons` with a failing/unavailable chat client and `includeExplanation: true`
+  still returns `200` with the full `criteria`/`rows` and `explanation: null` — narration failure
+  never fails the comparison (FR-019, constitution Principle V).
+- `POST /api/comparisons` with fewer than 2 valid product ids returns `400`, never a `200` with
+  a single-row or empty comparison.

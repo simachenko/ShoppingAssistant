@@ -50,6 +50,13 @@ total failure).
 
 **Errors**: `400` if `productIds` is empty or exceeds the max count.
 
+**Price-range filtering (FR-020, research.md §13)**: Pricing does not accept a `maxPrice`/
+`minPrice` query parameter — price-range filtering for a parametric product search is applied by
+the *caller* (the Advisor's search tool, or the Gateway's picker-facing composition endpoint)
+against this batch response, on the already category/characteristics-narrowed candidate id set
+Catalog returned. This keeps the pushdown-filter composition pattern in one place (the caller)
+rather than teaching Pricing about search semantics it doesn't otherwise need to know.
+
 ## Contract test expectations
 
 - Single-offer `404` vs `Unknown`-availability `200` are distinguishable and both tested.

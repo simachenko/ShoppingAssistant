@@ -39,12 +39,45 @@ public sealed class SearchProductsContractTests(CatalogApiTestFixture fixture) :
     {
         var client = fixture.Factory.CreateClient();
 
-        var response = await client.GetAsync("/api/catalog/products?q=Galaxy");
+        // "Galaxy" alone now also matches "Galaxy Tab S9" (both seeded products), so disambiguate
+        // with the full model name to keep asserting on exactly one result.
+        var response = await client.GetAsync("/api/catalog/products?q=Galaxy%20S24");
 
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<PagedResult<ProductSummaryDto>>();
         Assert.NotNull(result);
         var galaxy = Assert.Single(result!.Items);
+        Assert.Equal("Galaxy S24", galaxy.Name);
         Assert.Contains(galaxy.Specifications, s => s.Key == "camera_mp" && s.Value == "50");
+    }
+
+    [Fact]
+    public async Task Search_query_combining_brand_and_model_still_matches_the_single_product()
+    {
+        var client = fixture.Factory.CreateClient();
+
+        // The LLM often passes the user's own phrasing verbatim, which may combine brand and
+        // model in ways a naive substring search never matches.
+        var response = await client.GetAsync("/api/catalog/products?q=Samsung%20Galaxy%20S24");
+
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<ProductSummaryDto>>();
+        Assert.NotNull(result);
+        var galaxy = Assert.Single(result!.Items);
+        Assert.Equal("Galaxy S24", galaxy.Name);
+    }
+
+    [Fact]
+    public async Task Search_query_with_brand_and_model_concatenated_with_no_space_still_matches()
+    {
+        var client = fixture.Factory.CreateClient();
+
+        var response = await client.GetAsync("/api/catalog/products?q=GooglePixel%209");
+
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<ProductSummaryDto>>();
+        Assert.NotNull(result);
+        var pixel = Assert.Single(result!.Items);
+        Assert.Equal("Pixel 9", pixel.Name);
     }
 }

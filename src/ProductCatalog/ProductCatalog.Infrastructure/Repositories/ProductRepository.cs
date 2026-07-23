@@ -25,8 +25,33 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
 
         if (!string.IsNullOrWhiteSpace(query))
         {
-            productsQuery = productsQuery.Where(p =>
-                EF.Functions.ILike(p.Name, $"%{query}%") || EF.Functions.ILike(p.Description, $"%{query}%"));
+            // The LLM often passes the user's own phrasing verbatim, which may combine brand and
+            // model in ways a single "%query%" substring never matches (e.g. "Samsung Galaxy S24"
+            // when the product name alone is "Galaxy S24", or "GooglePixel 9" with no space at
+            // all). Two independent, deliberately generous strategies, either of which is enough:
+            // (1) every whitespace-separated word of the query appears somewhere across name,
+            // description, or brand — order- and field-independent; (2) the whole query, with
+            // whitespace stripped, is a substring of the brand+name with whitespace stripped too
+            // — catches brand-plus-model phrases regardless of spacing.
+            // Pre-format each token into its "%word%" pattern here (client-side) rather than
+            // inside the query lambda — EF Core cannot translate string interpolation/Format
+            // evaluated per-element of a captured array inside a correlated predicate.
+            var tokenPatterns = query
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(token => $"%{token}%")
+                .ToList();
+            var queryNoSpacesPattern = $"%{new string(query.Where(c => !char.IsWhiteSpace(c)).ToArray())}%";
+
+            productsQuery =
+                from p in productsQuery
+                join b in dbContext.Brands on p.BrandId equals b.BrandId
+                where
+                    tokenPatterns.All(pattern =>
+                        EF.Functions.ILike(p.Name, pattern) ||
+                        EF.Functions.ILike(p.Description, pattern) ||
+                        EF.Functions.ILike(b.Name, pattern))
+                    || EF.Functions.ILike((b.Name + p.Name).Replace(" ", ""), queryNoSpacesPattern)
+                select p;
         }
 
         var totalCount = await productsQuery.CountAsync(cancellationToken);

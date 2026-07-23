@@ -373,6 +373,100 @@ characteristic explicitly marked rather than guessed.
 
 ---
 
+## Phase 4.5: Deterministic Search & Direct Comparison (US2 Enhancement)
+
+> **Numbering note**: like Phase 3.5, this phase was added during a spec-refinement pass after
+> Phase 4 shipped, so its task IDs (T083+) continue from the highest number then in use rather
+> than fitting between T055 and T056. It must still be completed **before** Phase 6 (Polish) —
+> see spec.md FR-018–FR-022, SC-010–SC-012, and research.md §13–§15 for the requirements and
+> design this phase implements.
+
+**Goal**: Two things that previously depended on the LLM choosing to invoke them correctly no
+longer do. Product search accepts explicit category/price/characteristic filters instead of
+relying on the LLM to guess free-text query terms, with category names and comparable
+characteristics resolvable without guessing an id. Product comparison — ratings, deltas,
+rankings — is reachable through a stateless direct endpoint with no conversation turn and no LLM
+tool-selection step at all; the LLM's only optional role afterward is a narrow, constrained call
+that narrates the already-computed table. A capped, per-session memory of the most recently shown
+search/recommendation/comparison result lets ordinal follow-ups ("the first two") resolve to
+concrete ids instead of asking the LLM to reconstruct them from prior prose.
+
+**Independent Test**: Search with a category, a price range, and a characteristic condition and
+confirm every returned product satisfies all three; call the direct comparison endpoint with a
+known product-id set and confirm its `rating`/`deltasVsBest` are byte-identical to what the same
+ids produce through conversation; ask a follow-up ("compare the first two") after a search and
+confirm it resolves against the session's remembered result set.
+
+### Tests for This Phase
+
+- [ ] T083 [P] Contract test for `GET /api/catalog/categories?name=` in
+      `tests/ProductCatalog.Api.Tests/CategoryByNameContractTests.cs`.
+- [ ] T084 [P] Contract test for `POST /api/catalog/products/search` — characteristic filter
+      operators (`eq`/`gte`/`lte`/`between`), an unknown-attribute filter yielding zero matches,
+      and a `400` for an unrecognized operator or a missing `valueTo` — in
+      `tests/ProductCatalog.Api.Tests/ParametricSearchContractTests.cs`.
+- [ ] T085 [P] Unit tests for the characteristic-filter matcher (all four operators, unknown key,
+      non-numeric value against an ordinal operator) in
+      `tests/ProductCatalog.Application.Tests/CharacteristicFilterTests.cs`.
+- [ ] T086 [P] MCP tool contract test for the extended `search_products` (characteristics/price
+      range/sort/limit) and the new `get_category` tool in
+      `tests/ProductAdvisor.Api.Tests/AdvancedSearchToolTests.cs`.
+- [ ] T087 [P] Contract test for `POST /api/comparisons` — byte-identical `criteria`/`rows`
+      against the same ids compared through `compare_products` in conversation (SC-010),
+      `includeExplanation: false` makes zero LLM calls, a failing/unavailable chat client still
+      returns `200` with `explanation: null` (FR-019), and fewer than 2 valid ids is a `400` — in
+      `tests/ProductAdvisor.Api.Tests/DirectComparisonContractTests.cs`.
+- [ ] T088 [P] Contract test for Gateway `GET /api/products/search` and `POST /api/products/compare`
+      in `tests/Gateway.Api.Tests/ProductSearchAndCompareContractTests.cs`.
+- [ ] T089 [P] Unit test for `ConversationSession.LastSearchResults` being replaced (not appended
+      to) on each new search/recommendation/comparison in
+      `tests/ProductAdvisor.Domain.Tests/ConversationSessionTests.cs`.
+
+### Implementation for This Phase
+
+- [ ] T090 [P] Implement `GET /api/catalog/categories?name=` in
+      `src/ProductCatalog/ProductCatalog.Application/` + `.Api/` (reuses the existing
+      `FindCategoryByNameAsync` repository method) (depends on T083).
+- [ ] T091 Implement `CharacteristicFilter` (key/operator/value/valueTo) and its matcher in
+      `src/ProductCatalog/ProductCatalog.Application/` (depends on T085).
+- [ ] T092 Implement `POST /api/catalog/products/search` — SQL-pushed category/free-text
+      narrowing, then in-process characteristic filtering on the narrowed set (research.md §13)
+      — in `src/ProductCatalog/ProductCatalog.Application/` + `.Api/` (depends on T084, T091).
+- [ ] T093 Extend the `search_products` MCP tool with `categoryId`/`characteristics`/`priceMin`/
+      `priceMax`/`sortBy`/`limit` (composing Catalog's search with a Pricing batch price-range
+      filter, per research.md §13's pushdown pattern) and add the `get_category` tool in
+      `src/ProductAdvisor/ProductAdvisor.Infrastructure/Tools/` (depends on T086, T090, T092).
+- [ ] T094 Extract the `compare_products` composition (candidate assembly + `ComparisonEngine`
+      invocation) into a shared service in `src/ProductAdvisor/ProductAdvisor.Infrastructure/`
+      so it has exactly one implementation reused by both the MCP tool and the new direct
+      endpoint (research.md §14).
+- [ ] T095 Implement the stateless `POST /api/comparisons` endpoint — calls the shared service
+      from T094, then an optional separate constrained `IChatClient` call for `explanation` that
+      cannot alter the computed data and whose failure never blocks the response — in
+      `src/ProductAdvisor/ProductAdvisor.Api/` (depends on T087, T094).
+- [ ] T096 Add `ConversationSession.LastSearchResults` (capped, replaced per new result set) in
+      `src/ProductAdvisor/ProductAdvisor.Domain/` and wire updates into
+      `ConversationOrchestrator` whenever `search_products`/`get_recommendations`/
+      `compare_products` produces a candidate list (depends on T089).
+- [ ] T097 Implement Gateway `GET /api/products/search` (Catalog search + Pricing price-range
+      filter composition, mirroring `GET /api/products/{productId}`'s existing pattern) and
+      `POST /api/products/compare` (proxy to `POST /api/comparisons`) in
+      `src/Gateway/Gateway.Api/` (depends on T088, T092, T095).
+- [ ] T098 Implement the Blazor explicit product-picker page — search/filter form, checkbox
+      selection, a "Compare" button calling the Gateway's direct endpoints with no chat/LLM
+      involvement — in `src/WebApp/WebApp.Blazor/` (depends on T097).
+- [ ] T099 Manually re-verify: (a) chat-based "compare Samsung Galaxy S24 and GooglePixel 9"
+      still resolves via `search_products`/`get_category`/`compare_products`; (b) the explicit
+      picker's comparison is byte-identical to the same ids compared via chat; (c) a
+      category+price+characteristic-filtered search returns only qualifying products; (d) a
+      follow-up "compare the first two" after a search resolves via `LastSearchResults`.
+
+**Checkpoint**: Search filtering and product comparison are both reachable without depending on
+the LLM to compute anything; the LLM's only remaining job in this area is resolving language to
+ids (retrieval) and, optionally, narrating an already-computed table.
+
+---
+
 ## Phase 5: User Story 3 - Check Price, Availability, and Specific Characteristics (Priority: P3)
 
 **Goal**: A shopper asks a targeted question about one product's price, availability, or
@@ -460,6 +554,11 @@ nonexistent product and confirm an honest "not found" response.
   reuses US1's data-access tool
   infrastructure and Blazor shell but does not require US1's phase to be marked "done," only its
   underlying Foundational pieces.
+- **Deterministic Search & Direct Comparison (Phase 4.5)**: Depends on Phase 4 (US2) — it
+  extends `search_products` and reuses `ComparisonEngine`/`compare_products`'s composition. By
+  explicit direction, it is completed **before** Phase 6 (Polish); it has no dependency on
+  Phase 5 (US3) and Phase 5 has no dependency on it, so they may proceed in either order or in
+  parallel.
 - **User Story 3 (Phase 5)**: Depends only on Foundational; T061/T063 additionally build on the
   Catalog product-detail endpoint from T049 (US2) and the conversation/Blazor scaffolding from
   US1 — if US2 hasn't been built yet, complete T049 as a prerequisite before T061.
