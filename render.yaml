@@ -133,6 +133,7 @@ services:
     dockerfilePath: ./src/WebApp/WebApp.Blazor/Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /alive
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
