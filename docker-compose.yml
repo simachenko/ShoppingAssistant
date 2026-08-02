@@ -1,3 +1,11 @@
+# Optional OTLP export destination (research.md §16) — unset by default, so local Docker Compose
+# runs simply produce no traces/metrics/logs export (use `dotnet run --project src/Aspire/AppHost`
+# for a live local dashboard instead). Set OTEL_EXPORTER_OTLP_ENDPOINT/_HEADERS to point every
+# service at a free-tier OTLP backend (e.g. Grafana Cloud) to see them here too.
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+  OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,9 +28,12 @@ services:
       context: .
       dockerfile: src/ProductCatalog/ProductCatalog.Api/Dockerfile
     environment:
+      <<: *otel-env
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__catalogdb: "Host=postgres;Database=catalogdb;Username=catalog_role;Password=catalog_dev_password"
       SeedDemoData: "true"
+      # Shared secret required on every internal service-to-service call (FR-029, research.md §18).
+      InternalApiKey: "${INTERNAL_API_KEY:-dev-internal-api-key}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,9 +45,11 @@ services:
       context: .
       dockerfile: src/PricingAvailability/PricingAvailability.Api/Dockerfile
     environment:
+      <<: *otel-env
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__pricingdb: "Host=postgres;Database=pricingdb;Username=pricing_role;Password=pricing_dev_password"
       SeedDemoData: "true"
+      InternalApiKey: "${INTERNAL_API_KEY:-dev-internal-api-key}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,6 +61,7 @@ services:
       context: .
       dockerfile: src/ProductAdvisor/ProductAdvisor.Api/Dockerfile
     environment:
+      <<: *otel-env
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__advisordb: "Host=postgres;Database=advisordb;Username=advisor_role;Password=advisor_dev_password"
       services__catalog-api__http__0: "http://catalog-api:8080"
@@ -56,6 +70,7 @@ services:
       LlmProvider__Endpoint: "${LLM_PROVIDER_ENDPOINT:-}"
       LlmProvider__ApiKey: "${LLM_PROVIDER_API_KEY:-}"
       LlmProvider__Model: "${LLM_PROVIDER_MODEL:-}"
+      InternalApiKey: "${INTERNAL_API_KEY:-dev-internal-api-key}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,10 +86,19 @@ services:
       context: .
       dockerfile: src/Gateway/Gateway.Api/Dockerfile
     environment:
+      <<: *otel-env
       ASPNETCORE_ENVIRONMENT: Development
       services__catalog-api__http__0: "http://catalog-api:8080"
       services__pricing-api__http__0: "http://pricing-api:8080"
       services__advisor-api__http__0: "http://advisor-api:8080"
+      InternalApiKey: "${INTERNAL_API_KEY:-dev-internal-api-key}"
+      # Only the client id is needed here — the Gateway validates Google-issued tokens against
+      # Google's own OIDC discovery document, it never itself calls Google to sign anything
+      # (FR-030, research.md §17).
+      Authentication__Google__ClientId: "${GOOGLE_CLIENT_ID:-}"
+      # Lets tests/EndToEnd.Tests authenticate without a real interactive Google sign-in — this
+      # key is never set in render.yaml, so it has no effect on the real deployed Gateway.
+      Authentication__TestSigningKey: "e2e-tests-only-signing-key-never-used-in-production"
     depends_on:
       - catalog-api
       - pricing-api
@@ -87,8 +111,13 @@ services:
       context: .
       dockerfile: src/WebApp/WebApp.Blazor/Dockerfile
     environment:
+      <<: *otel-env
       ASPNETCORE_ENVIRONMENT: Development
       services__gateway-api__http__0: "http://gateway-api:8080"
+      # WebApp performs the actual Google sign-in flow (FR-030, research.md §17); Gateway only
+      # needs the client id above, to validate the resulting token's audience.
+      Authentication__Google__ClientId: "${GOOGLE_CLIENT_ID:-}"
+      Authentication__Google__ClientSecret: "${GOOGLE_CLIENT_SECRET:-}"
     depends_on:
       - gateway-api
     ports:

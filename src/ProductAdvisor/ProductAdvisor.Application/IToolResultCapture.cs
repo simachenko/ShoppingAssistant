@@ -17,7 +17,11 @@ public interface IToolResultCapture
 
     Comparison? Comparison { get; }
 
+    CheckoutLink? CheckoutLink { get; }
+
     void SetRecommendation(Recommendation recommendation, UserRequirement requirementUsed);
 
     void SetComparison(Comparison comparison);
+
+    void SetCheckoutLink(CheckoutLink checkoutLink);
 }

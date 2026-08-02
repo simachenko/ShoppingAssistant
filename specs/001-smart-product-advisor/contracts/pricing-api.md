@@ -2,6 +2,12 @@
 
 Base path: `/api/pricing`. Read-only for this feature (offer ingestion/import is out of scope).
 
+## Authentication
+
+Every endpoint below requires a valid `X-Internal-Api-Key` header (FR-029, research.md §18) —
+this service is never called directly by a browser or the WebApp, only by Gateway/Advisor.
+`401` on a missing or incorrect key, before any other request processing.
+
 ## GET /api/pricing/offers/{productId}
 
 Current price/availability for a single product.
@@ -64,3 +70,5 @@ rather than teaching Pricing about search semantics it doesn't otherwise need to
   request when some ids are missing.
 - `asOf` is always present and parseable — this is what lets the Advisor disclose data
   freshness when asked.
+- Every endpoint above returns `401` when called with a missing or incorrect
+  `X-Internal-Api-Key` (FR-029), before any pricing data is touched.

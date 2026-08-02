@@ -1,6 +1,6 @@
 # Render Blueprint — one free-tier web service per deployable, per plan.md.
-# Actual secret values (connection strings, LLM provider key) are set in the Render
-# dashboard/environment groups, never committed here (constitution Principle I).
+# Actual secret values (connection strings, LLM provider key, OTLP backend credentials) are set
+# in the Render dashboard/environment groups, never committed here (constitution Principle I).
 services:
   - type: web
     name: catalog-api
@@ -14,6 +14,14 @@ services:
         value: Production
       - key: ConnectionStrings__catalogdb
         sync: false
+      - key: InternalApiKey
+        sync: false
+      # Points every service's OpenTelemetry export at a free-tier OTLP backend (e.g. Grafana
+      # Cloud) in place of the local-only Aspire Dashboard (FR-027/FR-028, research.md §16).
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
 
   - type: web
     name: pricing-api
@@ -26,6 +34,12 @@ services:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
       - key: ConnectionStrings__pricingdb
+        sync: false
+      - key: InternalApiKey
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
 
   - type: web
@@ -56,6 +70,12 @@ services:
         sync: false
       - key: LlmProvider__Model
         sync: false
+      - key: InternalApiKey
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
 
   - type: web
     name: gateway-api
@@ -82,6 +102,14 @@ services:
           name: advisor-api
           type: web
           property: hostport
+      - key: InternalApiKey
+        sync: false
+      - key: Authentication__Google__ClientId
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
 
   - type: web
     name: webapp
@@ -97,3 +125,11 @@ services:
           name: gateway-api
           type: web
           property: hostport
+      - key: Authentication__Google__ClientId
+        sync: false
+      - key: Authentication__Google__ClientSecret
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false

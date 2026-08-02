@@ -11,6 +11,8 @@ public sealed class ConversationSessionConfiguration : IEntityTypeConfiguration<
         builder.ToTable("conversation_sessions");
         builder.HasKey(s => s.SessionId);
         builder.Property(s => s.SessionId).ValueGeneratedNever();
+        builder.Property(s => s.UserId).IsRequired();
+        builder.HasIndex(s => s.UserId);
         builder.Property(s => s.State).HasConversion<string>().IsRequired();
 
         // Conversation-internal state is never queried independently of its owning session, so

@@ -7,6 +7,7 @@ public sealed class ToolResultCapture : IToolResultCapture
     public Recommendation? Recommendation { get; private set; }
     public UserRequirement? RequirementUsed { get; private set; }
     public Comparison? Comparison { get; private set; }
+    public CheckoutLink? CheckoutLink { get; private set; }
 
     public void SetRecommendation(Recommendation recommendation, UserRequirement requirementUsed)
     {
@@ -17,5 +18,10 @@ public sealed class ToolResultCapture : IToolResultCapture
     public void SetComparison(Comparison comparison)
     {
         Comparison = comparison;
+    }
+
+    public void SetCheckoutLink(CheckoutLink checkoutLink)
+    {
+        CheckoutLink = checkoutLink;
     }
 }

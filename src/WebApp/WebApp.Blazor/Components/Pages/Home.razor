@@ -130,6 +130,14 @@
                 </table>
             </div>
         }
+        else if (entry.Turn is { Type: "checkoutLink", Url: not null } checkoutLinkTurn)
+        {
+            <div class="checkout-link-card">
+                <a href="@checkoutLinkTurn.Url" target="_blank" rel="noopener noreferrer" class="checkout-link-button">
+                    Proceed to checkout (@checkoutLinkTurn.ProductIds?.Count product(s))
+                </a>
+            </div>
+        }
     }
     @if (_isStreamingAssistantTurn)
     {
@@ -246,7 +254,7 @@
         var narration = turn.Type switch
         {
             "clarification" => turn.Question ?? "",
-            "recommendation" or "comparison" => turn.Message ?? "",
+            "recommendation" or "comparison" or "checkoutLink" => turn.Message ?? "",
             _ => "",
         };
         _history.Add(new HistoryEntry("assistant", narration, turn));

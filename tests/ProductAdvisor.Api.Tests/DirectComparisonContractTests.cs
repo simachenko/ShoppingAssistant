@@ -53,7 +53,7 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
         // Direct path — no chat client involved at all.
         await using var directFactory = makeFactory();
         directFactory.ChatClientOverride = new SpyChatClient(callsAreErrors: true);
-        var directClient = directFactory.CreateClient();
+        var directClient = directFactory.CreateAuthenticatedClient();
         var directResponse = await directClient.PostAsJsonAsync("/api/comparisons", new DirectComparisonRequest(
             [productA.ToString(), productB.ToString()], IncludeExplanation: false));
         directResponse.EnsureSuccessStatusCode();
@@ -65,7 +65,7 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
             "compare_products",
             new Dictionary<string, object?> { ["productIds"] = new[] { productA.ToString(), productB.ToString() } },
             "Here's how they compare.");
-        var conversationalClient = conversationalFactory.CreateClient();
+        var conversationalClient = conversationalFactory.CreateAuthenticatedClient();
         var sessionResponse = await conversationalClient.PostAsync("/api/conversations", content: null);
         var sessionId = (await sessionResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("sessionId").GetGuid();
         var conversationalResponse = await conversationalClient.PostAsJsonAsync(
@@ -98,7 +98,7 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
                 ], [])),
             ChatClientOverride = spy,
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync("/api/comparisons", new DirectComparisonRequest(
             [productA.ToString(), productB.ToString()], IncludeExplanation: false));
@@ -127,7 +127,7 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
                 ], [])),
             ChatClientOverride = new SpyChatClient(callsAreErrors: true),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync("/api/comparisons", new DirectComparisonRequest(
             [productA.ToString(), productB.ToString()], IncludeExplanation: true));
@@ -144,7 +144,7 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
     public async Task Fewer_than_two_product_ids_returns_400()
     {
         await using var factory = new AdvisorApiFactory(fixture.ConnectionString);
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync("/api/comparisons", new DirectComparisonRequest([Guid.NewGuid().ToString()]));
 
@@ -158,7 +158,7 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
         {
             CatalogResponder = _ => (HttpStatusCode.NotFound, null),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
             "/api/comparisons", new DirectComparisonRequest([Guid.NewGuid().ToString(), Guid.NewGuid().ToString()]));

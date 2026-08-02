@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using TestSupport;
 using TestSupport.SeedData;
 using Xunit;
 
@@ -17,13 +18,23 @@ public sealed class PerformanceTests : IClassFixture<DockerComposeStackFixture>,
 {
     private const int SampleCount = 30;
 
-    private readonly HttpClient _catalogClient = new() { BaseAddress = new Uri("http://localhost:5101") };
-    private readonly HttpClient _pricingClient = new() { BaseAddress = new Uri("http://localhost:5102") };
-    private readonly HttpClient _advisorClient = new() { BaseAddress = new Uri("http://localhost:5103") };
+    private readonly HttpClient _catalogClient = CreateInternalClient("http://localhost:5101");
+    private readonly HttpClient _pricingClient = CreateInternalClient("http://localhost:5102");
+    private readonly HttpClient _advisorClient = CreateInternalClient("http://localhost:5103");
 
     public PerformanceTests(DockerComposeStackFixture fixture)
     {
         _ = fixture;
+    }
+
+    // Catalog/Pricing/Advisor are never called by a browser and require the shared internal API
+    // key on every request (FR-029) — these tests bypass Gateway entirely to isolate each
+    // service's own latency, so they must attach it themselves.
+    private static HttpClient CreateInternalClient(string baseAddress)
+    {
+        var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+        client.DefaultRequestHeaders.Add("X-Internal-Api-Key", E2EAuthTestDefaults.InternalApiKey);
+        return client;
     }
 
     public void Dispose()

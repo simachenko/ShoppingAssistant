@@ -19,7 +19,7 @@ public sealed class ProductLookupScenarioTests : IClassFixture<DockerComposeStac
     public ProductLookupScenarioTests(DockerComposeStackFixture fixture)
     {
         _ = fixture; // ensures the stack has been seeded before any test in this class runs
-        _client = new HttpClient { BaseAddress = new Uri(DockerComposeStackFixture.GatewayBaseUrl) };
+        _client = DockerComposeStackFixture.CreateAuthenticatedGatewayClient();
     }
 
     public void Dispose() => _client.Dispose();

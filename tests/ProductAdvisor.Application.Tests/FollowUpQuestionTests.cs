@@ -19,7 +19,7 @@ public class FollowUpQuestionTests
     [Fact]
     public async Task A_session_with_prior_search_results_injects_their_ids_into_the_chat_history()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var firstId = Guid.NewGuid();
         var secondId = Guid.NewGuid();
         session.SetLastSearchResults(
@@ -43,7 +43,7 @@ public class FollowUpQuestionTests
     [Fact]
     public async Task A_session_with_no_prior_search_results_injects_no_such_context_message()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var chatClient = new FakeChatClient("What are you looking for?");
         var orchestrator = new ConversationOrchestrator(chatClient, new FakeToolCatalog(), new ToolResultCapture());
 

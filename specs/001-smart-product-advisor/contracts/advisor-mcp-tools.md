@@ -10,6 +10,13 @@ to narrate. The LLM may describe a returned rating, delta, or trade-off in more 
 never calculates one — if a number is shown to the user, exactly one of the tools below produced
 it.
 
+## Authentication
+
+The `/mcp` endpoint requires the same `X-Internal-Api-Key` and `X-User-Id` headers as
+`advisor-conversation-api.md` (FR-029/FR-031, research.md §17–§18) — every tool call happens
+within an already-authenticated conversation turn; there is no anonymous or cross-user tool
+invocation path.
+
 ## Tool: `search_products`
 
 **Description (as advertised to the LLM)**: "Search the retailer's catalog for products in a
@@ -160,6 +167,37 @@ resolved from conversation first (e.g., via `search_products`/`get_category`); c
 `POST /api/comparisons` directly when the ids are already known (e.g., an explicit product picker
 with no chat involved).
 
+## Tool: `generate_checkout_link`
+
+**Description (as advertised to the LLM)**: "Given one or more product ids the user wants to buy
+— resolved from their names or from an ordinal/descriptive reference to the most recently shown
+results — return a checkout link listing exactly those products. Do not construct the link
+yourself; always call this tool, and if you cannot resolve which products the user means, ask
+rather than guessing."
+
+**Input schema**:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "productIds": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  },
+  "required": ["productIds"]
+}
+```
+
+**Output**: `{ "url": "string", "productIds": ["..."] }` (FR-025, `CheckoutLink` in
+`data-model.md`) — the LLM relays `url` verbatim; it never edits or reconstructs it. If none of
+the supplied ids resolve to a real product, the tool returns a client-error result rather than a
+link to a partially-wrong set (mirrors `compare_products`'s "nothing to compare" handling).
+
+**Composition**: resolves each id against Catalog (existence check only — a checkout link does
+not need price/availability) and, using configuration for the retailer's checkout base URL,
+builds the URL deterministically. The LLM's only role beforehand is resolving *which* ids the
+user means — typically already done for it by `ConversationSession.LastSearchResults` (FR-022) —
+never deciding what goes into the link once ids are known.
+
 ## Tool contract test expectations
 
 - Each tool's declared JSON schema is validated against the MCP tool-list response (schema
@@ -189,3 +227,8 @@ with no chat involved).
 - `compare_products` (tool) and `POST /api/comparisons` (direct endpoint) are called with the
   same product-id set in the same test and asserted to return byte-for-byte identical `rating`/
   `deltasVsBest` values (SC-010) — the two entry points are not two independent implementations.
+- `generate_checkout_link` returns a `url` whose query parameters encode exactly the resolved
+  product ids (SC-015) — no extra, missing, or incorrect ones; called with an id that doesn't
+  resolve to a real product returns a client-error result, never a link built from a guess.
+- Every tool call made without a valid `X-Internal-Api-Key`/`X-User-Id` pair on the underlying
+  `/mcp` request is rejected before the tool handler runs (FR-029/FR-031).

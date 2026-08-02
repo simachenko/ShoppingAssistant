@@ -16,7 +16,7 @@ public class NotFoundHonestyTests
     [Fact]
     public async Task A_not_found_narration_with_no_captured_tool_result_produces_no_invented_recommendation_or_comparison()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var capture = new ToolResultCapture();
 
         var orchestrator = new ConversationOrchestrator(
@@ -34,7 +34,7 @@ public class NotFoundHonestyTests
     [Fact]
     public async Task A_not_found_narration_does_not_advance_the_session_into_recommending_or_comparing_state()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var orchestrator = new ConversationOrchestrator(
             new FakeChatClient("That product doesn't exist in our catalog."), new FakeToolCatalog(), new ToolResultCapture());
 

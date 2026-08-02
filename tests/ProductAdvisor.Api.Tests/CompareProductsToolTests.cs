@@ -19,7 +19,7 @@ public sealed class CompareProductsToolTests : IAsyncDisposable
 
     private async Task<McpClient> CreateClientAsync()
     {
-        var httpClient = _factory.CreateClient();
+        var httpClient = _factory.CreateAuthenticatedClient();
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions { Endpoint = new Uri(httpClient.BaseAddress!, "/mcp") },
             httpClient);

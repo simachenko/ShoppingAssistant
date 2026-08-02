@@ -10,7 +10,9 @@ public sealed record ConversationTurnResponse(
     IReadOnlyList<RecommendedItemResponse>? Items,
     string? UnmetConstraintExplanation,
     IReadOnlyList<string>? Criteria = null,
-    IReadOnlyList<ComparisonRowResponse>? Rows = null);
+    IReadOnlyList<ComparisonRowResponse>? Rows = null,
+    string? Url = null,
+    IReadOnlyList<Guid>? ProductIds = null);
 
 public sealed record ComparisonRowResponse(
     Guid ProductId,

@@ -12,6 +12,14 @@ public sealed class ConversationSession
     private List<SearchResultReference> _lastSearchResults = [];
 
     public Guid SessionId { get; private set; }
+
+    /// <summary>
+    /// The owning user's stable identifier (Google token's <c>sub</c> claim), set once at
+    /// creation and never changed — every session-scoped request MUST be checked against this
+    /// before returning the session's content (FR-031, research.md §17).
+    /// </summary>
+    public string UserId { get; private set; } = "";
+
     public ConversationState State { get; private set; } = ConversationState.Collecting;
     public IReadOnlyList<ConversationMessage> Messages => _messages;
     public UserRequirement CurrentRequirement { get; private set; } = UserRequirement.Empty;
@@ -24,12 +32,15 @@ public sealed class ConversationSession
     /// </summary>
     public IReadOnlyList<SearchResultReference> LastSearchResults => _lastSearchResults;
 
-    public ConversationSession(Guid sessionId)
+    public ConversationSession(Guid sessionId, string userId)
     {
         if (sessionId == Guid.Empty)
             throw new ArgumentException("SessionId is required.", nameof(sessionId));
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new ArgumentException("UserId is required.", nameof(userId));
 
         SessionId = sessionId;
+        UserId = userId;
     }
 
     private ConversationSession()

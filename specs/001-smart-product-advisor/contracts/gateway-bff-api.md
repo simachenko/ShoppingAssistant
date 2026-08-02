@@ -4,6 +4,15 @@ Base path: `/api`. This is the single entry point the Blazor UI calls; it never 
 Pricing, or Advisor directly. The Gateway generates an `X-Correlation-Id` if the incoming
 request doesn't carry one and forwards it on every downstream call (constitution Principle VI).
 
+## Authentication
+
+Every endpoint below requires a valid Google-issued identity token as
+`Authorization: Bearer <token>` (FR-030, research.md §17) — the Gateway validates it directly
+against Google's OIDC discovery document; it does not merely trust that the call came from the
+WebApp. `401` on a missing, invalid, or expired token. On every downstream call, the Gateway
+attaches the internal API key (FR-029, research.md §18) and forwards the token's `sub` claim as
+`X-User-Id` so Advisor can enforce session ownership (FR-031).
+
 ## POST /api/chat/messages
 
 Composition endpoint over the Advisor conversation API.
@@ -99,3 +108,12 @@ the explicit product-picker's "Compare" button calls; it never touches `/api/cha
   partial-success way as `GET /api/products/{productId}`.
 - `POST /api/products/compare` proxies `POST /api/comparisons` without reshaping — its response
   is byte-identical to calling the Advisor endpoint directly for the same request.
+- Every endpoint above returns `401` when called with no `Authorization` header, an invalid
+  token, or an expired token (FR-030) — asserted for at least one representative endpoint per
+  HTTP verb used in this contract.
+- The internal API key (`X-Internal-Api-Key`) and `X-User-Id` (the validated token's `sub`
+  claim) are present on every downstream call the Gateway makes, alongside `X-Correlation-Id`
+  (FR-029/FR-031).
+- `GET /api/chat/{sessionId}` for a session id that belongs to a different authenticated user
+  returns `404`, identical to an unknown session id (FR-031) — a non-owner cannot distinguish
+  "doesn't exist" from "not yours" from the response alone.

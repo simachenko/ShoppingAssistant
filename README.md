@@ -43,6 +43,17 @@ OpenAI-style endpoint) via `LlmProvider__Endpoint` / `LlmProvider__ApiKey` / `Ll
 — as environment variables for Docker Compose, or as Aspire parameters for the AppHost path.
 Never commit real values; see `render.yaml` for how these map to secrets in production.
 
+The whole app also requires sign-in (FR-030) and an internal service credential (FR-029):
+
+- `INTERNAL_API_KEY` — any shared secret string; Docker Compose defaults it to
+  `dev-internal-api-key` for local runs if unset, but a real value is required in `render.yaml`.
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — from a
+  [Google OAuth 2.0 Client ID](https://console.cloud.google.com/apis/credentials) (Web application
+  type), with `http://localhost:5000/signin-google` (Docker Compose) added as an authorized
+  redirect URI. WebApp performs the sign-in and needs both values; Gateway only needs
+  `GOOGLE_CLIENT_ID`, to validate the resulting token's audience against Google's own OIDC
+  discovery document (research.md §17) — it never talks to Google itself.
+
 ## Testing
 
 ```bash
@@ -68,6 +79,31 @@ docker compose down -v
 - [`specs/001-smart-product-advisor/data-model.md`](specs/001-smart-product-advisor/data-model.md) — entities and their relationships
 - [`specs/001-smart-product-advisor/research.md`](specs/001-smart-product-advisor/research.md) — the technical decisions behind the architecture, and why
 - [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — the non-negotiable project principles (grounded facts, deterministic computation, resilience, observability)
+
+## Observability
+
+Locally, `dotnet run --project src/Aspire/AppHost` opens the Aspire Dashboard with live
+traces/logs/metrics for every service — no extra setup needed (`docker compose up` alone
+exports nothing, since there's no dashboard process to receive it).
+
+In deployed environments (or to point Docker Compose at a real backend too), set
+`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_HEADERS` — every service already reads these
+standard OpenTelemetry env vars (`src/Aspire/ServiceDefaults/Extensions.cs`) and, when set,
+exports traces/metrics/logs via OTLP instead of (or alongside) the local dashboard
+(FR-027/FR-028, research.md §16). Any OTLP-compatible backend works; a convenient free-tier
+option is [Grafana Cloud](https://grafana.com/products/cloud/):
+
+1. Create a free Grafana Cloud stack, then find its OTLP endpoint under
+   **Connections → Add new connection → OpenTelemetry (OTLP)**.
+2. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to the shown endpoint URL, and
+   `OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic <base64(instanceId:apiKey)>` (Grafana
+   Cloud shows the exact value to copy).
+3. Apply both to every service — `render.yaml` declares them (`sync: false`) for all five;
+   for Docker Compose, export them before `docker compose up`.
+
+An unreachable/misconfigured OTLP backend never blocks a request — export failures are
+swallowed by the OpenTelemetry SDK's own batching/retry behavior, not surfaced to callers
+(FR-032, constitution Principle V).
 
 ## Deployment
 

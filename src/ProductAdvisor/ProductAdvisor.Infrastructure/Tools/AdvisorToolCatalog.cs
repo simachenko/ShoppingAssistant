@@ -37,5 +37,9 @@ public sealed class AdvisorToolCatalog(DataAccessTools dataAccessTools, ComputeT
             computeTools.CompareProductsAsync,
             "compare_products",
             "Given two or more product ids, return their specifications side-by-side using one shared set of criteria, plus a deterministic rating per product and computed deltas versus the best value in the set for each criterion. Do not compute comparisons, ratings, or differences yourself — always call this tool and only elaborate on its output."),
+        AIFunctionFactory.Create(
+            computeTools.GenerateCheckoutLinkAsync,
+            "generate_checkout_link",
+            "Given one or more product ids the user wants to buy — resolved from their names or from an ordinal/descriptive reference to the most recently shown results — return a checkout link listing exactly those products. Do not construct the link yourself; always call this tool, and if you cannot resolve which products the user means, ask rather than guessing."),
     ];
 }

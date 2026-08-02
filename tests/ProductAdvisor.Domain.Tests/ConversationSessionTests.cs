@@ -7,7 +7,7 @@ public class ConversationSessionTests
     [Fact]
     public void New_session_starts_in_Collecting_state_with_empty_requirement()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
 
         Assert.Equal(ConversationState.Collecting, session.State);
         Assert.Equal(UserRequirement.Empty, session.CurrentRequirement);
@@ -15,15 +15,29 @@ public class ConversationSessionTests
     }
 
     [Fact]
+    public void New_session_records_its_owning_user_id()
+    {
+        var session = new ConversationSession(Guid.NewGuid(), "google-sub-12345");
+
+        Assert.Equal("google-sub-12345", session.UserId);
+    }
+
+    [Fact]
     public void Constructor_throws_when_session_id_is_empty()
     {
-        Assert.Throws<ArgumentException>(() => new ConversationSession(Guid.Empty));
+        Assert.Throws<ArgumentException>(() => new ConversationSession(Guid.Empty, "test-user"));
+    }
+
+    [Fact]
+    public void Constructor_throws_when_user_id_is_missing()
+    {
+        Assert.Throws<ArgumentException>(() => new ConversationSession(Guid.NewGuid(), ""));
     }
 
     [Fact]
     public void StartRecommending_throws_when_essential_information_is_missing()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         session.UpdateRequirement(new UserRequirement { Category = "smartphones" }); // no budget yet
 
         Assert.Throws<InvalidOperationException>(session.StartRecommending);
@@ -33,7 +47,7 @@ public class ConversationSessionTests
     [Fact]
     public void StartRecommending_succeeds_once_category_and_budget_are_known()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         session.UpdateRequirement(new UserRequirement
         {
             Category = "smartphones",
@@ -48,7 +62,7 @@ public class ConversationSessionTests
     [Fact]
     public void AskClarification_sets_pending_question_and_stays_in_Collecting()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
 
         session.AskClarification(new ClarificationQuestion("Budget", "What's your budget?"));
 
@@ -60,7 +74,7 @@ public class ConversationSessionTests
     [Fact]
     public void UpdateRequirement_clears_pending_clarification_and_drops_back_to_Collecting()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         session.UpdateRequirement(new UserRequirement
         {
             Category = "smartphones",
@@ -80,7 +94,7 @@ public class ConversationSessionTests
     [Fact]
     public void StartComparing_clears_pending_clarification()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         session.AskClarification(new ClarificationQuestion("Budget", "What's your budget?"));
 
         session.StartComparing();
@@ -92,7 +106,7 @@ public class ConversationSessionTests
     [Fact]
     public void New_session_has_no_last_search_results()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
 
         Assert.Empty(session.LastSearchResults);
     }
@@ -100,7 +114,7 @@ public class ConversationSessionTests
     [Fact]
     public void SetLastSearchResults_replaces_rather_than_appends_to_the_prior_set()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var first = new SearchResultReference(Guid.NewGuid(), "Galaxy S24");
         var second = new SearchResultReference(Guid.NewGuid(), "Pixel 9");
 
@@ -113,7 +127,7 @@ public class ConversationSessionTests
     [Fact]
     public void SetLastSearchResults_throws_on_null()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
 
         Assert.Throws<ArgumentNullException>(() => session.SetLastSearchResults(null!));
     }
@@ -121,7 +135,7 @@ public class ConversationSessionTests
     [Fact]
     public void AddMessage_appends_to_history_in_order()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var first = new ConversationMessage("user", "hello", DateTimeOffset.UtcNow);
         var second = new ConversationMessage("assistant", "hi!", DateTimeOffset.UtcNow);
 

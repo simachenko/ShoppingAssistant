@@ -1,3 +1,7 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authorization;
 using Polly;
 using WebApp.Blazor.Components;
 using WebApp.Blazor.Services;
@@ -6,12 +10,40 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
+// Whole-app Google sign-in gate (FR-030, research.md §17): a cookie identifies the browser
+// session locally, but the identity WebApp forwards to Gateway is the Google-issued id_token
+// itself — Gateway validates that token independently rather than trusting this cookie.
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = GoogleDefaults.AuthenticationScheme;
+})
+.AddCookie(options => options.LoginPath = "/login")
+.AddGoogle(options =>
+{
+    options.ClientId = builder.Configuration["Authentication:Google:ClientId"] ?? "";
+    options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"] ?? "";
+    options.SaveTokens = true;
+});
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+builder.Services.AddCascadingAuthenticationState();
+
+builder.Services.AddScoped<CurrentUserTokenProvider>();
+builder.Services.AddTransient<BearerTokenHandler>();
+
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 #pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
 builder.Services.AddHttpClient<GatewayApiClient>(client => client.BaseAddress = new Uri("http://gateway-api"))
+    .AddHttpMessageHandler<BearerTokenHandler>()
     // See the matching comment in Gateway.Api/Program.cs — the SSE streaming call needs a
     // longer, retry-free timeout instead of the standard resilience handler's short-request assumptions.
     .RemoveAllResilienceHandlers()
@@ -33,10 +65,25 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.UseAntiforgery();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.MapGet("/login", (string? returnUrl) =>
+    TypedResults.Challenge(
+        new AuthenticationProperties { RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl },
+        [GoogleDefaults.AuthenticationScheme]))
+    .AllowAnonymous();
+
+app.MapPost("/logout", async (HttpContext context) =>
+{
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.LocalRedirect("/");
+});
 
 app.Run();

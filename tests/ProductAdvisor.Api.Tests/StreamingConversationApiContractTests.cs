@@ -58,7 +58,7 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
         const string userMessage = "I need a smartphone with a good camera and a budget of up to 15000 UAH";
 
         await using var nonStreamingFactory = makeFactory();
-        var nonStreamingClient = nonStreamingFactory.CreateClient();
+        var nonStreamingClient = nonStreamingFactory.CreateAuthenticatedClient();
         var nonStreamingSessionId = await CreateSessionAsync(nonStreamingClient);
         var nonStreamingResponse = await nonStreamingClient.PostAsJsonAsync(
             $"/api/conversations/{nonStreamingSessionId}/messages", new SendMessageRequest(userMessage));
@@ -66,7 +66,7 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
         var nonStreamingBody = await nonStreamingResponse.Content.ReadFromJsonAsync<ConversationTurnResponse>();
 
         await using var streamingFactory = makeFactory();
-        var streamingClient = streamingFactory.CreateClient();
+        var streamingClient = streamingFactory.CreateAuthenticatedClient();
         var streamingSessionId = await CreateSessionAsync(streamingClient);
         var (_, streamedResult) = await ReadStreamAsync(streamingClient, streamingSessionId, userMessage);
 
@@ -143,7 +143,7 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
                 "Here's a smartphone within your budget with a great camera.",
                 throwMidStream),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
         return (client, sessionId, factory);
     }

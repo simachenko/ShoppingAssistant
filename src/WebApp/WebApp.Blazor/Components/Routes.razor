@@ -4,3 +4,23 @@
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    // Blazor Server has no per-request HttpContext once the SignalR circuit is established, so
+    // the signed-in user's Google id_token — needed on every Gateway call (FR-030) — is read
+    // once here, during the initial static-SSR render where HttpContext is still cascaded, and
+    // cached in the scoped CurrentUserTokenProvider for the rest of the circuit's lifetime.
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [Inject]
+    private CurrentUserTokenProvider TokenProvider { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContext is not null)
+        {
+            TokenProvider.IdToken = await HttpContext.GetTokenAsync("id_token");
+        }
+    }
+}

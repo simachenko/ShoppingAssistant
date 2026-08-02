@@ -3,11 +3,64 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Gateway.Api;
 using Gateway.Api.Clients;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
 using Polly;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+
+// Every Gateway endpoint requires a Google-issued identity token, validated independently here
+// against Google's own OIDC discovery document — Gateway never merely trusts that a call came
+// from WebApp by network position (FR-030, research.md §17).
+var authenticationBuilder = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = "https://accounts.google.com";
+        options.MapInboundClaims = false;
+        var googleClientId = builder.Configuration["Authentication:Google:ClientId"];
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateAudience = !string.IsNullOrWhiteSpace(googleClientId),
+            ValidAudience = googleClientId,
+        };
+    });
+
+var authenticationSchemes = new List<string> { JwtBearerDefaults.AuthenticationScheme };
+
+// EndToEnd.Tests/CI cannot perform a real interactive Google sign-in, so — only when this
+// (non-production; never set in render.yaml, only in docker-compose.yml) configuration key is
+// present — a second, entirely separate JwtBearer scheme accepts tokens signed with a
+// test-only symmetric key instead. It shares nothing with the real Google scheme above, so it
+// can never be used to forge a token the Google scheme would accept.
+const string TestAuthenticationScheme = "E2ETest";
+var testSigningKey = builder.Configuration["Authentication:TestSigningKey"];
+if (!string.IsNullOrWhiteSpace(testSigningKey))
+{
+    authenticationBuilder.AddJwtBearer(TestAuthenticationScheme, options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(testSigningKey)),
+        };
+    });
+    authenticationSchemes.Add(TestAuthenticationScheme);
+}
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder(authenticationSchemes.ToArray())
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
+builder.Services.AddTransient<UserIdForwardingHandler>();
 
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
@@ -15,6 +68,7 @@ builder.Services.AddReverseProxy()
 
 #pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
 builder.Services.AddHttpClient<AdvisorApiClient>(client => client.BaseAddress = new Uri("http://advisor-api"))
+    .AddHttpMessageHandler<UserIdForwardingHandler>()
     // ServiceDefaults' standard resilience handler assumes short request/response calls (10s
     // per-attempt, 30s total, with retries) — wrong on two counts for the SSE streaming call:
     // a healthy in-progress stream can legitimately run past those windows, and retrying a
@@ -29,7 +83,13 @@ builder.Services.AddHttpClient<PricingApiClient>(client => client.BaseAddress = 
 
 var app = builder.Build();
 
+// Correlation id must wrap the exception handler, not the other way around — otherwise an
+// unhandled exception's own log line is written after the correlation-id scope has already
+// unwound and never carries it (FR-027, research.md §7/§16).
 app.UseCorrelationId();
+app.UseExceptionHandler();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.MapReverseProxy();
 

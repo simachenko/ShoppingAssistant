@@ -12,7 +12,7 @@ public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
     [Fact]
     public async Task Gte_characteristic_filter_returns_only_products_meeting_the_threshold()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var request = new ProductSearchRequest(
             Category: "Smartphones",
@@ -31,7 +31,7 @@ public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
     [Fact]
     public async Task Between_characteristic_filter_returns_only_products_within_range()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var request = new ProductSearchRequest(
             Category: "Smartphones",
@@ -49,7 +49,7 @@ public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
     [Fact]
     public async Task Characteristic_filter_on_an_unknown_attribute_yields_zero_matches_not_an_error()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var request = new ProductSearchRequest(
             Category: "Smartphones",
@@ -66,7 +66,7 @@ public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
     [Fact]
     public async Task Between_filter_missing_valueTo_returns_400()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var request = new ProductSearchRequest(
             Category: "Smartphones",
@@ -80,7 +80,7 @@ public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
     [Fact]
     public async Task Unrecognized_operator_returns_400()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync("/api/catalog/products/search", new
         {
@@ -94,7 +94,7 @@ public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
     [Fact]
     public async Task CategoryId_filter_narrows_to_that_category_only()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var request = new ProductSearchRequest(CategoryId: CatalogSeedData.LaptopsCategoryId);
 

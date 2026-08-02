@@ -115,11 +115,16 @@ request.
 | Field | Type | Notes |
 |---|---|---|
 | `SessionId` | Guid | Identity |
+| `UserId` | string | The owning user's stable identifier (Google token's `sub` claim), set once at creation from the caller's validated identity and never changed (FR-031, research.md §17) — every session-scoped request MUST be checked against this before returning the session's content |
 | `Messages` | `List<ConversationMessage>` | Ordered turn history (role, text, timestamp) |
 | `CurrentRequirement` | UserRequirement (value object) | The latest known snapshot of what the user wants — persists across turns until changed |
 | `PendingClarification` | ClarificationQuestion? | Set when essential info is missing; cleared once answered |
-| `LastRecommendation` | Recommendation? | The most recent recommendation set produced, for follow-up questions (US3) |
 | `LastSearchResults` | `List<SearchResultReference>` | The most recently shown search/recommendation/comparison candidates (id + name only) — lets an ordinal follow-up ("the first two", "the cheaper one") resolve to concrete ids (FR-022) instead of requiring the LLM to reconstruct them from prior prose. Replaced, never appended to, each time a new result set is produced — bounded, not a full history. |
+
+**Note**: an earlier revision of this table listed a separate `LastRecommendation` field; that
+was never implemented as its own field — `LastSearchResults` (generalized, research.md §15)
+covers the same follow-up-resolution need for recommendations, comparisons, and searches alike,
+so this table now reflects what actually exists rather than a superseded plan.
 
 Streaming (research.md §11) is a transport/presentation concern only — a `ConversationMessage`
 always stores the complete, final assistant text once a turn ends, never a partial fragment.
@@ -130,6 +135,30 @@ has no bearing on what gets persisted.
 → `Recommending` (requirement has at minimum Category + Budget, deterministic scoring runs) →
 `Comparing` (user asked to compare specific/candidate products) → back to `Collecting` if the
 user changes a constraint (FR-011 — prior recommendation is superseded, not silently merged).
+
+### User (external identity — not persisted anywhere in this system)
+
+| Field | Type | Notes |
+|---|---|---|
+| `UserId` | string | Google token's `sub` claim — stable, unique per Google account |
+| `Email` | string | Google token's `email` claim — used for display only, never as the identity key (emails can change; `sub` cannot) |
+
+There is no local `Users` table in any service. Every request's identity is established fresh
+from a validated Google-issued token (research.md §17); `ConversationSession.UserId` is the only
+place a user's identity is retained, and only as an opaque string used for ownership checks —
+this system builds no account/profile/password system of its own (FR-030, spec.md Assumptions).
+
+### CheckoutLink (value object, request-scoped — not persisted)
+
+| Field | Type | Notes |
+|---|---|---|
+| `Url` | string | The retailer's checkout destination, with the selected products' `ProductId`s encoded as query parameters |
+| `ProductIds` | `List<Guid>` | Exactly the products the user referenced (by name or by `LastSearchResults` ordinal/descriptive reference, FR-022) — never more, never fewer (SC-015) |
+
+Constructed deterministically from already-known product identifiers by
+`ProductAdvisor.Infrastructure` (FR-025) — the destination base URL is configuration, not
+user/LLM input; the LLM never chooses or alters which products' ids end up in the link, only
+narrates that the link was created.
 
 ### UserRequirement (value object)
 

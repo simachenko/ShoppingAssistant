@@ -62,7 +62,7 @@ public sealed class StreamingChatContractTests
             },
         };
 
-        return (factory.CreateClient(), () => calls);
+        return (factory.CreateAuthenticatedClient(), () => calls);
     }
 
     private static async Task<(List<string> Tokens, JsonElement? Result)> StreamChatAsync(HttpClient client, Guid? sessionId, string text)

@@ -11,7 +11,7 @@ public sealed class ProductAndCategoryDetailContractTests(CatalogApiTestFixture 
     [Fact]
     public async Task Known_product_id_returns_detail_including_description_and_isActive()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/catalog/products/{CatalogSeedData.GalaxyS24Id}");
 
@@ -28,7 +28,7 @@ public sealed class ProductAndCategoryDetailContractTests(CatalogApiTestFixture 
     [Fact]
     public async Task Unknown_product_id_returns_404_not_a_fabricated_record()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/catalog/products/{Guid.NewGuid()}");
 
@@ -38,7 +38,7 @@ public sealed class ProductAndCategoryDetailContractTests(CatalogApiTestFixture 
     [Fact]
     public async Task Known_category_id_returns_its_comparable_attribute_keys()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/catalog/categories/{CatalogSeedData.SmartphonesCategoryId}");
 
@@ -52,7 +52,7 @@ public sealed class ProductAndCategoryDetailContractTests(CatalogApiTestFixture 
     [Fact]
     public async Task Unknown_category_id_returns_404()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/catalog/categories/{Guid.NewGuid()}");
 

@@ -23,6 +23,14 @@ public static class ConversationApiMapper
             null,
             result.Comparison!.Criteria,
             result.Comparison.Rows.Select(ToRowResponse).ToList()),
+        "checkoutLink" => new ConversationTurnResponse(
+            "checkoutLink",
+            result.Message,
+            null,
+            null,
+            null,
+            Url: result.CheckoutLink!.Url,
+            ProductIds: result.CheckoutLink.ProductIds),
         _ => throw new NotSupportedException($"Unknown turn result type '{result.Type}'."),
     };
 

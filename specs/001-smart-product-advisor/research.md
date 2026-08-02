@@ -427,3 +427,121 @@ exists to close, and degrades further as a conversation gets longer. (b) Store t
 of just id+name — rejected as unnecessary duplication of data Catalog/Pricing already own and
 that can go stale; a follow-up that needs a full detail re-fetches it fresh, which also means the
 answer reflects current price/availability, not what was true when the list was first shown.
+
+## 16. Observability backend for logging, tracing, and metrics (FR-027/FR-028/FR-032/SC-019)
+
+**Decision**: Keep the already-adopted OpenTelemetry SDK (tracing, metrics, logging providers;
+`AddAspNetCoreInstrumentation`, `AddHttpClientInstrumentation`, `AddRuntimeInstrumentation`,
+correlation id) in every service, but point its OTLP exporter at a real, hosted,
+free-tier-friendly OTLP-compatible backend (e.g., Grafana Cloud's free tier, which accepts logs,
+traces, and metrics over OTLP in one place) for deployed environments, configured purely through
+`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_HEADERS` environment variables (`sync: false`
+in `render.yaml`). Locally, the .NET Aspire Dashboard remains the default view — no change to
+local dev. Server start/stop is already emitted by the ASP.NET Core Generic Host's own lifecycle
+logs (`Microsoft.Hosting.Lifetime`); this decision ensures those, request-tracing spans, and
+error-level logs actually reach a durable, queryable backend instead of only a container's
+ephemeral stdout. A minimal global exception-handling middleware is added to the four API
+services (Catalog, Pricing, Advisor, Gateway) — mirroring `WebApp.Blazor`'s existing
+`UseExceptionHandler` — so every unhandled exception is logged once, with the request's
+correlation id attached, and returns a clean `application/problem+json` response instead of a
+framework-default page or an unlogged bare 500.
+
+**Rationale**: Directly satisfies "it is better to use commonly used tools or integrations for
+this" without introducing a second, competing logging mechanism alongside OpenTelemetry (which is
+already the constitution's Principle VI direction, research.md §7) — OpenTelemetry's OTLP
+protocol is itself the industry-common integration point, and Grafana Cloud (or any OTLP-
+compatible SaaS with a free tier) is a commonly-used destination for it. Exporting to a real
+backend is the only gap between what already exists and "commonly used tools" being genuinely
+satisfiable — the SDK, instrumentation, and correlation-id propagation are already built
+(research.md §7, and the Phase 6 correlation-id-scope-rendering fix).
+
+**Alternatives considered**: (a) Serilog with a file/console sink — rejected; would duplicate
+OpenTelemetry's logging provider with a second, differently-configured mechanism for no added
+capability, and Serilog's own OTLP sink would just re-wrap what OpenTelemetry's exporter already
+does natively. (b) Self-hosted Seq via a new docker-compose/Render service — rejected as the
+default; it's a genuinely good local logging UX but is one more container to deploy, pay for, and
+keep healthy on Render, and only covers logs (not traces/metrics) — left as a documented
+alternative for local-only use if a contributor prefers it, not the production path. (c)
+Provider-specific SDKs (e.g., a vendor's proprietary agent) instead of OpenTelemetry — rejected;
+would violate the swappability this system already relies on for the LLM provider (research.md
+§10) and lock observability to one vendor.
+
+## 17. User authentication: Google sign-in, validated independently at the Gateway (FR-030/FR-031/SC-017/SC-018)
+
+**Decision**: `WebApp.Blazor` adds ASP.NET Core cookie authentication plus an OpenID Connect
+challenge against Google's OIDC endpoint, so every page requires a signed-in Google account
+(FR-030) before rendering. After sign-in, `WebApp.Blazor` attaches the user's Google-issued ID
+token as a Bearer token on every call it makes to `Gateway.Api`. `Gateway.Api` independently
+validates that same token — via `Microsoft.AspNetCore.Authentication.JwtBearer` configured
+against Google's OIDC discovery document (`https://accounts.google.com/.well-known/openid-configuration`)
+— on every endpoint, rather than trusting that a call which merely arrived from the WebApp's
+network address is legitimate. The token's `sub` claim becomes the durable `UserId`;
+`ConversationSession` gains a `UserId` set once at creation from the caller's validated identity
+(FR-031, data-model.md), and every session-scoped endpoint (`GET /api/conversations/{id}`,
+`POST /api/conversations/{id}/messages`, etc.) checks the requesting identity against the
+session's owner, refusing (404, not 403 — never confirm a session id exists to a non-owner) on
+mismatch.
+
+**Rationale**: Independent validation at the Gateway means the identity check doesn't rely on
+"only the WebApp can reach the Gateway" staying true forever — a future second client (a mobile
+app, a partner integration) authenticates the same way without the Gateway's trust model
+changing, and a compromised or misconfigured internal network segment can't impersonate a user
+just by being able to route a request to the Gateway. This is the same "never trust network
+position alone" posture research.md §18 applies to the internal boundary, applied here to the
+user-facing one. Google was named explicitly by the requirement (not a generic "any OAuth
+provider"), and Google's OIDC support means no custom token-issuance code is needed anywhere in
+this system — both `WebApp.Blazor` and `Gateway.Api` validate against Google's own published
+keys/discovery document.
+
+Since Catalog/Pricing/Advisor never see the user's Google token directly (only Gateway does),
+Gateway forwards the validated `UserId` (the token's `sub` claim) to Advisor as a trusted internal
+header (`X-User-Id`) alongside the internal API key (research.md §18) whenever it calls an
+Advisor endpoint that creates or touches a session. Advisor trusts this header's value *only*
+because the internal API key already establishes that the caller is Gateway — the same
+"trusted subsystem" pattern the correlation id already uses (research.md §7), applied to
+identity instead of tracing.
+
+**Alternatives considered**: (a) WebApp-only validation, with the Gateway trusting any call as
+already-authenticated because it's "internal" — rejected per the explicit requirement that the
+Gateway also validates the Google identity, and because it would make the Gateway's own API
+contract silently depend on which client happens to be calling it today. (b) A custom
+username/password or magic-link auth system — rejected; the requirement explicitly names Google,
+and building bespoke credential storage would also newly trigger PII-handling obligations this
+system's Clarifications session (spec.md) deliberately avoided. (c) Session-cookie-only auth
+between WebApp and Gateway (no Bearer token forwarding) — rejected; it would mean the Gateway
+never sees the user's actual identity, making FR-031's cross-user session check impossible to
+enforce at the Gateway layer, only in the browser/WebApp, which a direct API call could bypass.
+
+## 18. Internal service-to-service authentication: a shared API key (FR-029/SC-016)
+
+**Decision**: A single shared secret (`InternalApiKey`, one value per environment, injected via
+environment variable / Aspire parameter / Render `sync: false` env var) is attached as a header
+(e.g. `X-Internal-Api-Key`) by a `DelegatingHandler` registered on every outbound `HttpClient`
+that calls another internal service — Gateway→Advisor, Gateway→Catalog, Gateway→Pricing,
+Advisor→Catalog, Advisor→Pricing — mirroring exactly how `CorrelationIdHandler` already attaches
+the correlation id to every outbound call (research.md §7). A small piece of inbound middleware,
+added to Catalog/Pricing/Advisor's (and, for its own internal-facing routes, Gateway's) request
+pipeline, validates the header's presence and value before any other request handling runs,
+returning `401` immediately on a missing or incorrect key. Catalog and Pricing — which are never
+called by anything except Gateway or Advisor, never directly by a browser — require *only* this
+key; they have no Google-identity concept at all.
+
+**Rationale**: Matches "every service-to-service call" from the clarifying answer literally and
+uniformly — one policy, one shared secret, applied the same way everywhere, rather than a mixed
+policy that's harder to reason about or audit. Piggy-backing on the existing
+`DelegatingHandler`/middleware pattern already established for the correlation id means this adds
+no new architectural concept, just a second header following the same mechanism.
+
+**Alternatives considered**: (a) Per-service-pair keys (a distinct secret for each caller→callee
+pair) — rejected as disproportionate key-management overhead for this system's scale (5
+services, one shared trust domain); revisit only if services genuinely need independent
+revocation, which nothing here currently requires. (b) mTLS between services — rejected; Render's
+free-tier container networking and this project's demo scope don't warrant the certificate
+issuance/rotation machinery mTLS requires, and a shared API key gives the same "reject
+unauthenticated internal traffic" guarantee FR-029 actually asks for. (c) Reusing the Google
+identity token for internal calls too (skip a separate internal credential) — rejected; Catalog
+and Pricing have no reason to understand Google's token format or validate against Google's
+discovery document, and it would couple purely-internal services to a user-facing identity
+provider for no benefit — the internal boundary and the user-facing boundary are deliberately
+independent mechanisms answering different questions ("is this a legitimate internal caller?" vs.
+"is this a legitimate signed-in user?").

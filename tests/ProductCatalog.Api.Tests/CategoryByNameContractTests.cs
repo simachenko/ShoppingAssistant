@@ -11,7 +11,7 @@ public sealed class CategoryByNameContractTests(CatalogApiTestFixture fixture) :
     [Fact]
     public async Task Known_category_name_resolves_case_insensitively()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/catalog/categories?name=smartphones");
 
@@ -26,7 +26,7 @@ public sealed class CategoryByNameContractTests(CatalogApiTestFixture fixture) :
     [Fact]
     public async Task Unknown_category_name_returns_404()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/catalog/categories?name=NoSuchCategory");
 
@@ -36,7 +36,7 @@ public sealed class CategoryByNameContractTests(CatalogApiTestFixture fixture) :
     [Fact]
     public async Task Missing_name_query_parameter_returns_400()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/catalog/categories");
 

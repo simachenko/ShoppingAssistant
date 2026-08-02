@@ -18,7 +18,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
         {
             ChatClientOverride = new ScriptedChatClient(null, null, "What's your budget for this laptop?"),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
 
         var response = await client.PostAsJsonAsync(
@@ -59,7 +59,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
                 },
                 "Here's a smartphone within your budget with a great camera."),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
 
         var response = await client.PostAsJsonAsync(
@@ -118,7 +118,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
                 new Dictionary<string, object?> { ["productIds"] = new[] { productA.ToString(), productB.ToString() } },
                 "Here's how the Galaxy S24 and Pixel 9 compare."),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
 
         var response = await client.PostAsJsonAsync(
@@ -154,7 +154,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
                 new Dictionary<string, object?> { ["category"] = "Laptops", ["budgetAmount"] = 30000m, ["budgetCurrency"] = "UAH" },
                 "Here's a laptop within your budget."),
         };
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
 
         await client.PostAsJsonAsync(
@@ -175,7 +175,7 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
     public async Task Unknown_session_returns_404()
     {
         await using var factory = new AdvisorApiFactory(fixture.ConnectionString);
-        var client = factory.CreateClient();
+        var client = factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/conversations/{Guid.NewGuid()}");
 

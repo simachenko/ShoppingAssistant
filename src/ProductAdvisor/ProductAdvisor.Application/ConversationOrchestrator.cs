@@ -36,6 +36,10 @@ public sealed class ConversationOrchestrator(
         that name as the free-text query — category is optional, do not ask for it first. If
         nothing matches, tell the user the product could not be found rather than asking a
         clarifying question or guessing.
+        When the user wants to buy, check out, or get a purchase link for one or more products,
+        resolve which product ids they mean (by name or by their position in the most recently
+        shown results) and call generate_checkout_link — do not build a link yourself, and ask
+        for clarification instead of guessing if you cannot resolve the products.
         """;
 
     public async Task<AdvisorTurnResult> ProcessMessageAsync(
@@ -101,6 +105,11 @@ public sealed class ConversationOrchestrator(
 
     private AdvisorTurnResult FinalizeTurn(ConversationSession session, string narration)
     {
+        if (resultCapture.CheckoutLink is not null)
+        {
+            return AdvisorTurnResult.ForCheckoutLink(narration, resultCapture.CheckoutLink);
+        }
+
         if (resultCapture.Comparison is not null)
         {
             session.StartComparing();

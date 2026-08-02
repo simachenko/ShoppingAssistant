@@ -1,7 +1,9 @@
+using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using PricingAvailability.Infrastructure;
 using ProductCatalog.Infrastructure;
+using TestSupport;
 using TestSupport.SeedData;
 using Xunit;
 
@@ -22,6 +24,18 @@ namespace EndToEnd.Tests;
 public sealed class DockerComposeStackFixture : IAsyncLifetime
 {
     public const string GatewayBaseUrl = "http://localhost:5100";
+
+    /// <summary>
+    /// A Gateway client pre-authenticated with a test-signed bearer token (see
+    /// <see cref="TestSupport.E2EAuthTestDefaults"/>) — every real Gateway endpoint requires one
+    /// (FR-030), and the docker-compose stack these tests run against is configured to accept it.
+    /// </summary>
+    public static HttpClient CreateAuthenticatedGatewayClient(string userId = E2EAuthTestDefaults.DefaultUserId)
+    {
+        var client = new HttpClient { BaseAddress = new Uri(GatewayBaseUrl) };
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", E2EAuthTestDefaults.CreateBearerToken(userId));
+        return client;
+    }
 
     private const string CatalogConnectionString =
         "Host=localhost;Port=5432;Database=catalogdb;Username=catalog_role;Password=catalog_dev_password";

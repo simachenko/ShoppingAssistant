@@ -17,7 +17,7 @@ public sealed class ComparisonScenarioTests : IClassFixture<DockerComposeStackFi
     public ComparisonScenarioTests(DockerComposeStackFixture fixture)
     {
         _ = fixture;
-        _client = new HttpClient { BaseAddress = new Uri(DockerComposeStackFixture.GatewayBaseUrl) };
+        _client = DockerComposeStackFixture.CreateAuthenticatedGatewayClient();
     }
 
     public void Dispose() => _client.Dispose();

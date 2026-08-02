@@ -43,7 +43,7 @@ public sealed class ProductDetailContractTests
             },
         };
 
-        var response = await factory.CreateClient().GetAsync($"/api/products/{ProductId}");
+        var response = await factory.CreateAuthenticatedClient().GetAsync($"/api/products/{ProductId}");
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -62,7 +62,7 @@ public sealed class ProductDetailContractTests
             CatalogResponder = _ => new HttpResponseMessage(HttpStatusCode.NotFound),
         };
 
-        var response = await factory.CreateClient().GetAsync($"/api/products/{ProductId}");
+        var response = await factory.CreateAuthenticatedClient().GetAsync($"/api/products/{ProductId}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -83,7 +83,7 @@ public sealed class ProductDetailContractTests
             PricingResponder = _ => throw new HttpRequestException("Pricing is unreachable."),
         };
 
-        var response = await factory.CreateClient().GetAsync($"/api/products/{ProductId}");
+        var response = await factory.CreateAuthenticatedClient().GetAsync($"/api/products/{ProductId}");
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();

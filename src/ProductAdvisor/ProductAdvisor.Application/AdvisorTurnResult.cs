@@ -14,6 +14,7 @@ public sealed record AdvisorTurnResult
     public string? Question { get; init; }
     public Recommendation? Recommendation { get; init; }
     public Comparison? Comparison { get; init; }
+    public CheckoutLink? CheckoutLink { get; init; }
 
     public static AdvisorTurnResult ForClarification(string question) =>
         new() { Type = "clarification", Question = question };
@@ -23,4 +24,7 @@ public sealed record AdvisorTurnResult
 
     public static AdvisorTurnResult ForComparison(string message, Comparison comparison) =>
         new() { Type = "comparison", Message = message, Comparison = comparison };
+
+    public static AdvisorTurnResult ForCheckoutLink(string message, CheckoutLink checkoutLink) =>
+        new() { Type = "checkoutLink", Message = message, CheckoutLink = checkoutLink };
 }

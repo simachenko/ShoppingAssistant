@@ -15,7 +15,7 @@ public sealed class ObservabilityTests : IClassFixture<DockerComposeStackFixture
     public ObservabilityTests(DockerComposeStackFixture fixture)
     {
         _ = fixture;
-        _client = new HttpClient { BaseAddress = new Uri(DockerComposeStackFixture.GatewayBaseUrl) };
+        _client = DockerComposeStackFixture.CreateAuthenticatedGatewayClient();
     }
 
     public void Dispose() => _client.Dispose();

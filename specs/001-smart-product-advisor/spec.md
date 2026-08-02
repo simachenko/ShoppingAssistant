@@ -81,6 +81,23 @@ A shopper who has been shown recommendations, a comparison, or search results �
 
 ---
 
+### User Story 5 - Sign In Securely Before Using the Advisor (Foundational — gates all other stories)
+
+A visitor arrives at the site and must sign in with their Google account before they can chat, search, compare, or check out; once signed in, they only ever see their own conversation sessions, never another user's.
+
+**Why this priority**: This is a trust-boundary prerequisite, not a feature slice on its own — every other user story (recommend, compare, look up a fact, check out) now runs *inside* an authenticated identity, so this must exist before those stories can be exercised end-to-end in their final form. It is called out separately because it is testable independently of what happens after sign-in.
+
+**Independent Test**: Can be tested by attempting to reach any advisor page or API without a valid signed-in identity and confirming access is refused; and by, as two different signed-in users, confirming neither can read or continue the other's conversation session by id.
+
+**Acceptance Scenarios**:
+
+1. **Given** a visitor who is not signed in, **When** they try to use the advisor (chat, search, comparison, or product detail), **Then** they are directed to sign in with Google before any product data or conversation state is returned.
+2. **Given** a user has successfully signed in with Google, **When** they use the advisor, **Then** every conversation session they create is tied to their identity.
+3. **Given** two different signed-in users, **When** one attempts to access a conversation session id that belongs to the other, **Then** access is refused rather than returning the other user's conversation.
+4. **Given** a signed-in user's Google session/token has expired, **When** they next interact with the advisor, **Then** they are asked to sign in again rather than being served a request under a stale or invalid identity.
+
+---
+
 ### Edge Cases
 
 - What happens when the user's stated budget is below the price of the cheapest relevant product? The advisor MUST communicate that no match exists rather than recommending an over-budget item.
@@ -96,6 +113,10 @@ A shopper who has been shown recommendations, a comparison, or search results �
 - What happens to a previously shown recommendation card list or comparison table in the conversation view when the user sends a further message (even an unrelated one)? The prior structured rendering MUST remain visible in its place in the conversation rather than disappearing once a new turn's result arrives.
 - What happens when a second message for the same session arrives while a prior turn for that session is still being processed? The system MUST reject or ignore the second message rather than processing both concurrently — one turn completes before the next begins for a given session.
 - What happens when the user asks to check out with no prior search, recommendation, or comparison in the session (or references a product never shown)? The advisor MUST ask which products are meant rather than guessing an identifier — the same honesty pattern as an ordinal follow-up with nothing to resolve against.
+- What happens when a request to any user-facing endpoint arrives without a valid, current Google identity? The system MUST refuse the request (redirect to sign-in for a browser page load, or an authentication-failure response for an API call) rather than serving it anonymously or under a guessed identity.
+- What happens when a request between two internal services arrives without the correct internal credential? The receiving service MUST refuse the request rather than processing it — internal endpoints are never reachable on the trust of network location alone.
+- What happens when a signed-in user requests a conversation session id that belongs to a different user? The system MUST refuse access rather than returning that session's content, regardless of whether the id itself is guessable or was leaked.
+- What happens when the observability/monitoring backend is temporarily unreachable? The system MUST continue serving requests normally — logging, tracing, and metrics export are never allowed to block or fail a user-facing request.
 
 ## Requirements *(mandatory)*
 
@@ -127,6 +148,12 @@ A shopper who has been shown recommendations, a comparison, or search results �
 - **FR-024**: The system MUST reject or ignore a second message submitted for a session while a prior turn for that same session is still being processed, so that two turns for one session never process concurrently.
 - **FR-025**: The system MUST be able to generate a checkout link for one or more products the user has picked or that were most recently shown in the session (reusing the retained result set from FR-022), encoding those products' identifiers as URL query parameters, so the user can proceed to purchase them outside the advisor. Purchase processing, payment, cart management, and order fulfillment themselves are out of scope for this system.
 - **FR-026**: The conversation and product-picker UI MUST be keyboard-navigable with a readable focus order, using semantic HTML elements for interactive controls (inputs, buttons, links) rather than non-semantic elements requiring custom keyboard handling; no formal WCAG conformance level is required.
+- **FR-027**: Every service MUST log its own startup and shutdown, every request it handles (with enough context to trace that request across the services it causes to be called), and every error it encounters, using a common, industry-standard logging/tracing mechanism shared across all services rather than a bespoke per-service format.
+- **FR-028**: Every service MUST expose a way to check whether it is running and accepting traffic (a health check), and MUST report performance and resource-usage indicators (e.g., request latency, error rate, memory/CPU usage) through a common, industry-standard monitoring mechanism.
+- **FR-029**: Every call between internal services (Gateway, Advisor, Catalog, Pricing) MUST be authenticated with a shared internal credential; a service MUST refuse a request from another internal service that does not present a valid credential.
+- **FR-030**: Every user-facing entry point MUST require the user to be signed in with a Google account before any product data, conversation state, or advisor response is returned; a request without a valid, current signed-in identity MUST be refused rather than served anonymously.
+- **FR-031**: The system MUST bind each conversation session to the identity of the user who created it, and MUST refuse any attempt — by a different signed-in user — to read or continue a session that is not theirs.
+- **FR-032**: Logging, tracing, and metrics collection MUST NOT block or fail a user-facing request if the observability backend they report to is unavailable — observability is always best-effort relative to the request it describes.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -137,6 +164,7 @@ A shopper who has been shown recommendations, a comparison, or search results �
 - **Clarification Question**: A single focused question raised when essential information is missing, tied to the specific missing piece of the User Need.
 - **Search Filter**: A structured description of what a product search must satisfy — category, free-text keywords, a price range, and zero or more characteristic conditions (attribute name, comparison operator, value) — evaluated deterministically; never inferred or approximated by the language model.
 - **Checkout Link**: A URL to the retailer's own checkout/purchase flow, carrying the identifiers of one or more products the user picked or was most recently shown, as query parameters — constructed deterministically from known identifiers, never guessed. This system does not implement the destination checkout flow itself.
+- **User**: A signed-in shopper's identity, established via Google sign-in — at minimum a stable identifier and the account's email, used to bind conversation sessions to their owner and to refuse cross-user access. The system does not build its own account/password system; identity is entirely delegated to Google.
 
 ## Success Criteria *(mandatory)*
 
@@ -157,6 +185,10 @@ A shopper who has been shown recommendations, a comparison, or search results �
 - **SC-013**: After N conversation turns each producing a structured rendering (recommendation cards, comparison table, or clarification prompt), all N renderings remain visible and correctly attributed to their turn — none are removed or overwritten by a later turn's result.
 - **SC-014**: When a second message for a session is submitted while a prior turn for that session is still processing, 100% of such attempts result in exactly one turn being processed at a time for that session — never two turns' effects interleaved or applied out of order.
 - **SC-015**: 100% of generated checkout links encode exactly the product identifiers the user referenced (by name or by ordinal/session-memory reference) — no extra, missing, or incorrect product ids.
+- **SC-016**: 100% of internal service-to-service calls without a valid internal credential are refused before any product/pricing/conversation data is returned.
+- **SC-017**: 100% of user-facing requests without a valid, current signed-in Google identity are refused before any product data, conversation state, or advisor response is returned.
+- **SC-018**: 0% of attempts by one signed-in user to read or continue another signed-in user's conversation session succeed.
+- **SC-019**: 100% of service start events, service stop events, handled requests, and encountered errors appear in the shared logging/tracing mechanism; observability backend unavailability causes 0% of user-facing request failures.
 
 ## Assumptions
 
@@ -164,6 +196,11 @@ A shopper who has been shown recommendations, a comparison, or search results �
 - Conversation history (a session's messages, requirements, and shown results) is treated as ordinary application data, not sensitive personal data — no special PII redaction, encryption, or limited-retention handling is required beyond what the constitution already requires for credentials/secrets (never conversation text).
 - A checkout link (FR-025) points to the retailer's own existing checkout/purchase flow; this system is responsible only for constructing that link from known product identifiers, never for payment, cart, or order processing themselves.
 - Accessibility (FR-026) is a baseline, not a compliance target: using native, semantic HTML controls (inputs, buttons, links) rather than custom widgets is sufficient; no accessibility audit or formal WCAG conformance level is in scope for this project.
+- Logging/tracing/monitoring (FR-027/FR-028) build on the already-adopted industry-standard mechanism (OpenTelemetry) rather than introducing a second, competing one; "commonly used tools or integrations" is satisfied by exporting to a real, widely-used observability backend instead of console-only output.
+- The internal service credential (FR-029) is a single shared secret known to every service, rotated by redeploying with a new value; this is not a per-service-pair key scheme — proportionate to this system's scale, not a zero-trust mesh.
+- Google sign-in (FR-030) gates every user-facing entry point (chat, search, comparison, product detail, checkout) — there is no anonymous/browse-only mode.
+- Both the user-facing entry point and the internal boundary independently verify identity/credentials: the Google-issued identity is validated by the outermost service that receives it directly from the signed-in user's browser session, not merely trusted because it arrived through that path — the same "never trust network position alone" posture FR-029 applies internally.
+- Session ownership (FR-031) is established at session-creation time from the caller's verified identity and never changes; there is no "share a session with another user" capability in this feature.
 - The product catalog can span multiple product categories (not limited to smartphones); comparison criteria are defined per category based on the attributes available for that category.
 - "Essential information" for an initial recommendation is, at minimum, product category and budget; feature preferences refine the recommendation but are not always required to attempt one.
 - When no product fits the stated constraints, the advisor discloses the gap and may suggest the closest alternatives only if explicitly labeled as not fully matching; it will not silently exceed a stated budget.

@@ -33,7 +33,7 @@ public sealed class GetRecommendationsToolTests : IAsyncDisposable
                 new PricingOfferDto(productId, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed"),
             ], []));
 
-        var httpClient = _factory.CreateClient();
+        var httpClient = _factory.CreateAuthenticatedClient();
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions { Endpoint = new Uri(httpClient.BaseAddress!, "/mcp") },
             httpClient);
@@ -75,7 +75,7 @@ public sealed class GetRecommendationsToolTests : IAsyncDisposable
         _factory.PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
             [new PricingOfferDto(productId, new PricingMoneyDto(30000m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], []));
 
-        var httpClient = _factory.CreateClient();
+        var httpClient = _factory.CreateAuthenticatedClient();
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions { Endpoint = new Uri(httpClient.BaseAddress!, "/mcp") },
             httpClient);
@@ -114,7 +114,7 @@ public sealed class GetRecommendationsToolTests : IAsyncDisposable
 
         _factory.PricingResponder = _ => throw new HttpRequestException("Connection refused (simulated Pricing outage)");
 
-        var httpClient = _factory.CreateClient();
+        var httpClient = _factory.CreateAuthenticatedClient();
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions { Endpoint = new Uri(httpClient.BaseAddress!, "/mcp") },
             httpClient);

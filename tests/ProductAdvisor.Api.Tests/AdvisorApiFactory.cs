@@ -32,6 +32,7 @@ public sealed class AdvisorApiFactory(string? connectionString = null) : WebAppl
             {
                 ["ConnectionStrings:advisordb"] = connectionString
                     ?? "Host=localhost;Database=advisordb_test;Username=test;Password=test",
+                ["InternalApiKey"] = InternalApiKeyTestDefaults.Key,
             });
         });
 
@@ -59,5 +60,26 @@ public sealed class AdvisorApiFactory(string? connectionString = null) : WebAppl
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AdvisorDbContext>();
         await db.Database.MigrateAsync();
+    }
+
+    /// <summary>Default caller identity for <see cref="CreateAuthenticatedClient"/> — most tests
+    /// don't care which user they are, only that they're a valid, consistent one. A dedicated
+    /// session-ownership test uses two distinct ids instead of this shared one.</summary>
+    public const string DefaultTestUserId = "test-user";
+
+    /// <summary>
+    /// Pre-authenticated with the internal API key the hosted app expects (see
+    /// <see cref="ConfigureWebHost"/>) and a default <c>X-User-Id</c> (<see cref="DefaultTestUserId"/>)
+    /// — existing contract tests use this instead of the inherited <c>CreateClient()</c> now that
+    /// session-scoped endpoints require both. A dedicated rejection/ownership test builds its own
+    /// <see cref="HttpClient"/> with different headers instead.
+    /// </summary>
+    public HttpClient CreateAuthenticatedClient()
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add(
+            Microsoft.Extensions.Hosting.InternalApiKeyMiddleware.HeaderName, InternalApiKeyTestDefaults.Key);
+        client.DefaultRequestHeaders.Add("X-User-Id", DefaultTestUserId);
+        return client;
     }
 }

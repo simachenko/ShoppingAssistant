@@ -22,7 +22,7 @@ public class OrchestrationNeverComputesTests
     [Fact]
     public async Task When_a_tool_already_captured_a_recommendation_the_orchestrator_relays_it_verbatim()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var requirementUsed = new UserRequirement { Category = "smartphones", Budget = new Money(15000m, "UAH") };
         var expectedRecommendation = new Recommendation
         {
@@ -57,7 +57,7 @@ public class OrchestrationNeverComputesTests
     [Fact]
     public async Task When_no_tool_captured_anything_the_orchestrator_treats_the_LLM_text_as_a_clarification()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var capture = new ToolResultCapture();
 
         var orchestrator = new ConversationOrchestrator(
@@ -75,7 +75,7 @@ public class OrchestrationNeverComputesTests
     [Fact]
     public async Task The_orchestrator_passes_the_full_tool_catalog_to_the_chat_client_every_turn()
     {
-        var session = new ConversationSession(Guid.NewGuid());
+        var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var chatClient = new FakeChatClient("ok");
         var orchestrator = new ConversationOrchestrator(chatClient, new FakeToolCatalog(), new ToolResultCapture());
 

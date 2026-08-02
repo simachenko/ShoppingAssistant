@@ -11,7 +11,7 @@ public sealed class BatchOffersContractTests(PricingApiTestFixture fixture) : IC
     [Fact]
     public async Task Single_offer_lookup_returns_the_seeded_offer()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/pricing/offers/{CatalogSeedData.GalaxyS24Id}");
 
@@ -26,7 +26,7 @@ public sealed class BatchOffersContractTests(PricingApiTestFixture fixture) : IC
     [Fact]
     public async Task Single_offer_lookup_for_unknown_product_returns_404()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/pricing/offers/{Guid.NewGuid()}");
 
@@ -36,7 +36,7 @@ public sealed class BatchOffersContractTests(PricingApiTestFixture fixture) : IC
     [Fact]
     public async Task Batch_lookup_returns_partial_results_when_some_ids_are_unknown()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
         var unknownId = Guid.NewGuid();
 
         var response = await client.GetAsync(
@@ -53,7 +53,7 @@ public sealed class BatchOffersContractTests(PricingApiTestFixture fixture) : IC
     [Fact]
     public async Task Batch_lookup_with_no_productIds_returns_400()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync("/api/pricing/offers?productIds=");
 
@@ -63,7 +63,7 @@ public sealed class BatchOffersContractTests(PricingApiTestFixture fixture) : IC
     [Fact]
     public async Task Unknown_availability_is_distinguishable_from_missing_offer()
     {
-        var client = fixture.Factory.CreateClient();
+        var client = fixture.Factory.CreateAuthenticatedClient();
 
         var response = await client.GetAsync($"/api/pricing/offers/{CatalogSeedData.Xps13Id}");
 

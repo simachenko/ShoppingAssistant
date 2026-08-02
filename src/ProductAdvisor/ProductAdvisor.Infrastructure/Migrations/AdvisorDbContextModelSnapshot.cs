@@ -32,7 +32,13 @@ namespace ProductAdvisor.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("SessionId");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("conversation_sessions", "advisor");
                 });

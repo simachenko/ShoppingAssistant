@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PricingAvailability.Infrastructure;
+using TestSupport;
 using TestSupport.SeedData;
 
 namespace PricingAvailability.Api.Tests;
@@ -23,6 +24,21 @@ public sealed class PricingApiFactory : WebApplicationFactory<Program>
         // Services is ever touched and Program.cs's top-level code actually runs — is visible in
         // time for AddNpgsqlDbContext's eager read.
         Environment.SetEnvironmentVariable("ConnectionStrings__pricingdb", connectionString);
+        Environment.SetEnvironmentVariable("InternalApiKey", InternalApiKeyTestDefaults.Key);
+    }
+
+    /// <summary>
+    /// Pre-authenticated with the internal API key the hosted app expects (see constructor) —
+    /// existing contract tests use this instead of the inherited <c>CreateClient()</c> now that
+    /// the middleware requires the key. A dedicated rejection test builds its own
+    /// <see cref="HttpClient"/> without this header (or a wrong one) instead.
+    /// </summary>
+    public HttpClient CreateAuthenticatedClient()
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Add(
+            Microsoft.Extensions.Hosting.InternalApiKeyMiddleware.HeaderName, InternalApiKeyTestDefaults.Key);
+        return client;
     }
 
     public async Task InitializeDatabaseAsync()

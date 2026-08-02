@@ -54,7 +54,7 @@ public sealed class ProductSearchAndCompareContractTests
             },
         };
 
-        var response = await factory.CreateClient().GetAsync(
+        var response = await factory.CreateAuthenticatedClient().GetAsync(
             "/api/products/search?category=Smartphones&priceMin=10000&priceMax=50000");
         response.EnsureSuccessStatusCode();
 
@@ -77,7 +77,7 @@ public sealed class ProductSearchAndCompareContractTests
                 """),
         };
 
-        var response = await factory.CreateClient().GetAsync(
+        var response = await factory.CreateAuthenticatedClient().GetAsync(
             "/api/products/search?category=Smartphones&priceMin=5000&priceMax=10000");
         response.EnsureSuccessStatusCode();
 
@@ -100,7 +100,7 @@ public sealed class ProductSearchAndCompareContractTests
             PricingResponder = _ => throw new HttpRequestException("Pricing is unreachable."),
         };
 
-        var response = await factory.CreateClient().GetAsync("/api/products/search?category=Smartphones");
+        var response = await factory.CreateAuthenticatedClient().GetAsync("/api/products/search?category=Smartphones");
         response.EnsureSuccessStatusCode();
 
         var items = (await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToList();
@@ -118,7 +118,7 @@ public sealed class ProductSearchAndCompareContractTests
             CatalogResponder = _ => JsonResponse(HttpStatusCode.BadRequest, "\"Unknown operator 'bogus'.\""),
         };
 
-        var response = await factory.CreateClient().GetAsync(
+        var response = await factory.CreateAuthenticatedClient().GetAsync(
             "/api/products/search?category=Smartphones&characteristics=camera_mp:bogus:50");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -139,7 +139,7 @@ public sealed class ProductSearchAndCompareContractTests
         };
 
         string[] productIds = ["00000000-0000-0000-0003-000000000001", "00000000-0000-0000-0003-000000000006"];
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/products/compare", new
+        var response = await factory.CreateAuthenticatedClient().PostAsJsonAsync("/api/products/compare", new
         {
             productIds,
             includeExplanation = false,
@@ -161,7 +161,7 @@ public sealed class ProductSearchAndCompareContractTests
         };
 
         string[] productIds = ["00000000-0000-0000-0003-000000000001"];
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/products/compare", new { productIds });
+        var response = await factory.CreateAuthenticatedClient().PostAsJsonAsync("/api/products/compare", new { productIds });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

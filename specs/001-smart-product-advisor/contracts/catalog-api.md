@@ -4,6 +4,12 @@ Base path (internal, called by Advisor's MCP tools and by the Gateway for detail
 `/api/catalog`. All responses are JSON. All endpoints are read-only for this feature (catalog
 authoring/import is out of scope).
 
+## Authentication
+
+Every endpoint below requires a valid `X-Internal-Api-Key` header (FR-029, research.md §18) —
+this service is never called directly by a browser or the WebApp, only by Gateway/Advisor.
+`401` on a missing or incorrect key, before any other request processing.
+
 ## GET /api/catalog/products
 
 Search products by category, free-text keyword, and optional attribute filters.
@@ -127,3 +133,5 @@ search index populated via events — out of scope for this feature.
   `200` with an empty `items` array, not an error (a valid, just unsatisfiable, filter).
 - `POST /products/search` with an unrecognized `operator`, or a `between` filter missing
   `valueTo`, returns `400`.
+- Every endpoint above returns `401` when called with a missing or incorrect
+  `X-Internal-Api-Key` (FR-029), before any product data is touched.

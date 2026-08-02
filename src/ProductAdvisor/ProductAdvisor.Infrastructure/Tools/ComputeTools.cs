@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.Extensions.Configuration;
 using ModelContextProtocol.Server;
 using ProductAdvisor.Application;
 using ProductAdvisor.Domain;
@@ -17,7 +18,8 @@ public sealed class ComputeTools(
     CatalogClient catalogClient,
     PricingClient pricingClient,
     IToolResultCapture resultCapture,
-    ProductComparisonService comparisonService)
+    ProductComparisonService comparisonService,
+    IConfiguration configuration)
 {
     [McpServerTool(Name = "get_recommendations", UseStructuredContent = true)]
     [Description("Given a fully-specified need (category, budget, required features, preferences), return a ranked, deterministically scored set of matching products with pre-computed match reasons and trade-offs — or an explanation of why nothing matches. Do not attempt to filter, rank, or score candidates yourself; always call this tool once category and budget are known.")]
@@ -59,5 +61,30 @@ public sealed class ComputeTools(
         var comparison = await comparisonService.CompareAsync(productIds, cancellationToken);
         resultCapture.SetComparison(comparison);
         return comparison;
+    }
+
+    [McpServerTool(Name = "generate_checkout_link", UseStructuredContent = true)]
+    [Description("Given one or more product ids the user wants to buy — resolved from their names or from an ordinal/descriptive reference to the most recently shown results — return a checkout link listing exactly those products. Do not construct the link yourself; always call this tool, and if you cannot resolve which products the user means, ask rather than guessing.")]
+    public async Task<CheckoutLink> GenerateCheckoutLinkAsync(
+        [Description("One or more product ids (guid) the user wants to buy")] IReadOnlyList<string> productIds,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = productIds.Select(Guid.Parse).Distinct().ToList();
+
+        var details = await Task.WhenAll(ids.Select(id => catalogClient.GetProductDetailAsync(id, cancellationToken)));
+        var resolvedIds = details.Where(d => d is not null).Select(d => d!.ProductId).ToList();
+
+        if (resolvedIds.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "None of the requested products could be found; nothing to check out.");
+        }
+
+        var baseUrl = configuration["CheckoutBaseUrl"] ?? "https://retailer.example/checkout";
+        var url = $"{baseUrl}?productIds={string.Join(",", resolvedIds)}";
+
+        var checkoutLink = new CheckoutLink { Url = url, ProductIds = resolvedIds };
+        resultCapture.SetCheckoutLink(checkoutLink);
+        return checkoutLink;
     }
 }

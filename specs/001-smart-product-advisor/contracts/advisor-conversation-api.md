@@ -4,6 +4,18 @@ Base path: `/api/conversations`, hosted by `ProductAdvisor.Api` alongside the MC
 This is what the Gateway/BFF calls on behalf of the Blazor chat UI — it is a separate surface
 from `/mcp` (that one is for MCP-standard tool clients; this one drives the actual chat turn).
 
+## Authentication
+
+Every endpoint below requires a valid `X-Internal-Api-Key` header (FR-029, research.md §18) —
+this service is never called directly by a browser, only by Gateway. Session-scoped endpoints
+(everything except `POST /api/conversations`, which creates a new session) additionally require
+an `X-User-Id` header — Gateway's already-validated caller identity (research.md §17), trusted
+here only because the internal API key already establishes the caller is Gateway. `POST
+/api/conversations` records the creating request's `X-User-Id` as the new session's owner
+(FR-031); every other endpoint compares its `X-User-Id` against the session's stored owner and
+returns `404` (never `403` — a non-owner must not learn the session id exists at all) on
+mismatch.
+
 ## POST /api/conversations
 
 Start a new session.
@@ -20,7 +32,7 @@ Send one user message and get the advisor's next turn.
 { "text": "I need a smartphone with a good camera and a budget of up to 15,000 UAH" }
 ```
 
-**Response 200** — one of three shapes, discriminated by `"type"`. In every shape, the
+**Response 200** — one of four shapes, discriminated by `"type"`. In every shape, the
 structured fields (`items`, `criteria`/`rows`, `rating`, `deltasVsBest`, etc.) are copied
 verbatim from the corresponding MCP tool result (`get_recommendations` / `compare_products` —
 see `advisor-mcp-tools.md`); `message` is the LLM's natural-language narration of that same
@@ -91,10 +103,31 @@ A `null` value in `values` means that criterion could not be verified for that p
 the conversation API layer or the LLM. The same `criteria`/`rows` are also reachable outside any
 conversation via `POST /api/comparisons` below (FR-018) — both paths call the same computation.
 
-**Errors**: `404` unknown `sessionId`; `400` empty message text; `503` (with a body explaining
-the degraded state) if the LLM provider and/or both upstream services are unreachable after
-resilience policies are exhausted — the Advisor still MUST respond, per constitution Principle
-V, rather than the caller seeing a bare timeout.
+**Checkout Link** (FR-025, US4, populated from the `generate_checkout_link` tool result):
+
+```json
+{
+  "type": "checkoutLink",
+  "message": "string — LLM narration confirming what's in the link, no new facts",
+  "url": "https://retailer.example/checkout?productIds=<guid>,<guid>",
+  "productIds": ["guid", "guid"]
+}
+```
+
+`url`/`productIds` are copied verbatim from the tool result (SC-015) — the conversation API
+layer never edits the link. If the user's referenced products can't be resolved, the turn
+returns a **Clarification** shape instead (asking which products are meant), never a
+partially-wrong checkout link.
+
+**Errors**: `401` missing/invalid `X-Internal-Api-Key`, or a missing/invalid/expired
+`X-User-Id`/Google identity upstream at the Gateway (FR-029/FR-030); `404` unknown `sessionId`
+**or** a `sessionId` that exists but belongs to a different user (FR-031 — the response is
+identical either way, so a non-owner cannot distinguish "doesn't exist" from "not yours"); `409`
+a second message arrives for a session while a prior turn for that session is still processing
+(FR-024 — the caller should retry once the in-flight turn completes, not immediately); `400`
+empty message text; `503` (with a body explaining the degraded state) if the LLM provider and/or
+both upstream services are unreachable after resilience policies are exhausted — the Advisor
+still MUST respond, per constitution Principle V, rather than the caller seeing a bare timeout.
 
 ## POST /api/conversations/{sessionId}/messages/stream
 
@@ -220,3 +253,12 @@ that constraints persisted correctly across turns (FR-011).
   never fails the comparison (FR-019, constitution Principle V).
 - `POST /api/comparisons` with fewer than 2 valid product ids returns `400`, never a `200` with
   a single-row or empty comparison.
+- Every session-scoped endpoint returns `401` when called with a missing/incorrect
+  `X-Internal-Api-Key`, and `404` when `X-User-Id` doesn't match the session's stored owner
+  (FR-029/FR-031) — asserted as the same status/body as a genuinely unknown `sessionId`.
+- A second `POST .../messages` for the same `sessionId`, sent while the first is still being
+  processed (simulated via a slow/blocked stubbed tool call), returns `409` for the second
+  request rather than both being processed (FR-024/SC-014).
+- `generate_checkout_link` resolved through a conversational message returns a `checkoutLink`
+  turn whose `url`/`productIds` match what the same ids would produce through the MCP tool
+  directly (mirrors the `POST /api/comparisons` byte-identical-paths pattern).

@@ -30,7 +30,9 @@ public sealed record ChatTurnDto(
     IReadOnlyList<RecommendedItemDto>? Items,
     string? UnmetConstraintExplanation,
     IReadOnlyList<string>? Criteria = null,
-    IReadOnlyList<ComparisonRowDto>? Rows = null);
+    IReadOnlyList<ComparisonRowDto>? Rows = null,
+    string? Url = null,
+    IReadOnlyList<Guid>? ProductIds = null);
 
 /// <summary>
 /// One item from the Gateway's streaming chat endpoint (FR-015/research.md §11) — either a

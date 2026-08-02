@@ -21,7 +21,7 @@ public sealed class DataAccessToolsTests : IAsyncDisposable
             return _client;
         }
 
-        var httpClient = _factory.CreateClient();
+        var httpClient = _factory.CreateAuthenticatedClient();
         var transport = new HttpClientTransport(
             new HttpClientTransportOptions { Endpoint = new Uri(httpClient.BaseAddress!, "/mcp") },
             httpClient);

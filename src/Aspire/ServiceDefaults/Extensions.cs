@@ -28,12 +28,26 @@ public static class Extensions
 
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddTransient<CorrelationIdHandler>();
+        builder.Services.AddTransient<InternalApiKeyHandler>();
+
+        // Registered here so every service has it available; only the four API services
+        // (Catalog, Pricing, Advisor, Gateway) actually activate it via app.UseExceptionHandler()
+        // — WebApp.Blazor keeps its own UseExceptionHandler("/Error") redirect instead
+        // (FR-027/FR-032, research.md §16).
+        builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+        builder.Services.AddProblemDetails();
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
             // Propagate the human-readable correlation id before resilience/service discovery
             // so retries carry the same id (research.md §7).
             http.AddHttpMessageHandler<CorrelationIdHandler>();
+
+            // Attach the internal service credential to every internal HttpClient call
+            // (FR-029, research.md §18) — safe to apply uniformly since every HttpClient
+            // registered through this factory calls another internal service, never a
+            // third party (the LLM provider client is a separate SDK client).
+            http.AddHttpMessageHandler<InternalApiKeyHandler>();
 
             // Turn on resilience by default
             http.AddStandardResilienceHandler();
@@ -120,6 +134,18 @@ public static class Extensions
         return app;
     }
 
+    /// <summary>
+    /// Requires the internal service credential on every request except health/liveness checks
+    /// (FR-029, research.md §18). Call only from services never reached by a browser — Catalog,
+    /// Pricing, Advisor. Never call from Gateway or WebApp, which authenticate their callers via
+    /// Google OAuth instead (research.md §17).
+    /// </summary>
+    public static WebApplication UseInternalApiKeyAuth(this WebApplication app)
+    {
+        app.UseMiddleware<InternalApiKeyMiddleware>();
+        return app;
+    }
+
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
         // Adding the FULL health checks endpoint (which can report per-dependency details) to
@@ -128,17 +154,19 @@ public static class Extensions
         if (app.Environment.IsDevelopment())
         {
             // All health checks must pass for app to be considered ready to accept traffic after starting
-            app.MapHealthChecks(HealthEndpointPath);
+            app.MapHealthChecks(HealthEndpointPath).AllowAnonymous();
         }
 
         // The "live" liveness check reports only a plain Healthy/Unhealthy with no dependency
         // detail, so it's safe in every environment — and it must be, since Render's Blueprint
         // health check hits a path on every deployed service by default (no route at "/" would
-        // otherwise mark every backend service permanently unhealthy in production).
+        // otherwise mark every backend service permanently unhealthy in production). AllowAnonymous
+        // matters specifically for Gateway/WebApp, which enforce a RequireAuthenticatedUser
+        // fallback authorization policy (FR-030) that would otherwise 401 the health checker.
         app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
         {
             Predicate = r => r.Tags.Contains("live")
-        });
+        }).AllowAnonymous();
 
         return app;
     }

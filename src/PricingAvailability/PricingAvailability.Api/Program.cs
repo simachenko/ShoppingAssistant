@@ -15,7 +15,12 @@ builder.Services.AddScoped<PricingService>();
 
 var app = builder.Build();
 
+// Correlation id must wrap the exception handler, not the other way around — otherwise an
+// unhandled exception's own log line is written after the correlation-id scope has already
+// unwound and never carries it (FR-027, research.md §7/§16).
 app.UseCorrelationId();
+app.UseExceptionHandler();
+app.UseInternalApiKeyAuth();
 app.MapDefaultEndpoints();
 
 // Demo/local-dev convenience: apply migrations and seed a fixed dataset if empty. Guarded by

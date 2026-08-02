@@ -623,6 +623,130 @@ nonexistent product and confirm an honest "not found" response.
 
 ---
 
+## Phase 7: Access Control, Observability Hardening & Checkout Link (Foundational + US4 Enhancement)
+
+> **Numbering note**: this phase was added during a spec-refinement pass after Phase 6 shipped,
+> continuing task IDs from the highest number then in use (T101) rather than renumbering. See
+> spec.md FR-024/FR-025/FR-026/FR-027–FR-032, User Story 4, User Story 5, SC-014–SC-019, and
+> research.md §16–§18 for the requirements and design this phase implements.
+
+**Goal**: Every user-facing request requires a signed-in Google identity, verified independently
+by the Gateway rather than trusted by network position; every internal service-to-service call
+requires a shared internal credential; a signed-in user can never read another user's
+conversation session; logs/traces/metrics reach a real, commonly-used observability backend
+instead of console-only output; a second message for a session in flight is rejected rather than
+processed concurrently; and a user can ask the advisor for a checkout link covering the products
+they picked or were most recently shown.
+
+**Independent Test**: Reach any Gateway endpoint with no/invalid/expired Google token and confirm
+`401`; call Catalog/Pricing/Advisor directly with no/invalid internal API key and confirm `401`;
+as two different signed-in users, confirm neither can read the other's session; send a second
+message for a session while the first is still processing and confirm `409`; ask, after a
+recommendation, to "check out with the first one" and confirm the returned link's product id
+matches; confirm a deliberately-thrown exception in any API service is logged with its
+correlation id and returns a clean `problem+json` body, not a raw stack trace.
+
+### Tests for This Phase
+
+- [X] T102 [P] Contract test: `Catalog.Api`/`Pricing.Api`/`Advisor.Api` endpoints return `401`
+      for a missing or incorrect `X-Internal-Api-Key`, and succeed with a correct one, in each
+      service's existing `*.Api.Tests` project (FR-029).
+- [X] T103 [P] Contract test: Gateway endpoints return `401` for a missing, malformed, or
+      expired `Authorization: Bearer` token, and succeed with a valid one (using a test JWT
+      signed by a fake OIDC provider substituted for Google's in tests), in
+      `tests/Gateway.Api.Tests/AuthenticationContractTests.cs` (FR-030).
+- [X] T104 [P] Contract test: a session created by user A returns `404` (not `403`) when
+      requested with user B's `X-User-Id`, and `200` for user A, in
+      `tests/ProductAdvisor.Api.Tests/SessionOwnershipContractTests.cs` (FR-031).
+- [X] T105 [P] Contract test: a second `POST .../messages` for the same `sessionId`, sent while
+      the first is still processing (simulated via a blocked/slow stubbed tool call), returns
+      `409` for the second request, in
+      `tests/ProductAdvisor.Api.Tests/ConcurrentMessageRejectionTests.cs` (FR-024/SC-014).
+- [X] T106 [P] MCP tool contract test for `generate_checkout_link` — resolves ids, returns a
+      `url` encoding exactly those ids, and returns a client-error result for an unresolvable
+      id — in `tests/ProductAdvisor.Api.Tests/CheckoutLinkToolTests.cs` (FR-025/SC-015).
+- [X] T107 [P] EndToEnd test covering a full sign-in (test-double Google identity) → chat →
+      "check out with the first one" → checkout-link scenario, plus a check that a deliberately
+      thrown exception in an API service produces a correlation-id-tagged error log and a clean
+      `problem+json` response (not a raw stack trace), in
+      `tests/EndToEnd.Tests/AccessControlAndCheckoutScenarioTests.cs`.
+
+### Implementation for This Phase
+
+- [X] T108 Implement the internal-API-key mechanism in `src/Aspire/ServiceDefaults/` — an
+      outbound `DelegatingHandler` (mirroring `CorrelationIdHandler`) that attaches
+      `X-Internal-Api-Key` from configuration to every outbound call, and inbound middleware
+      that validates it and short-circuits with `401` when absent/incorrect (research.md §18)
+      (depends on T102).
+- [X] T109 Apply the inbound internal-API-key middleware to `ProductCatalog.Api`,
+      `PricingAvailability.Api`, and `ProductAdvisor.Api` (including `/mcp`), and register the
+      outbound handler on every `HttpClient` that calls another internal service (Gateway→
+      Advisor/Catalog/Pricing, Advisor→Catalog/Pricing) in
+      `src/Gateway/Gateway.Api/` + `src/ProductAdvisor/ProductAdvisor.Infrastructure/` (depends
+      on T108).
+- [X] T110 Add `ConversationSession.UserId` in `src/ProductAdvisor/ProductAdvisor.Domain/` (set
+      once at creation, never changed) + EF Core migration; enforce it in every session-scoped
+      endpoint in `src/ProductAdvisor/ProductAdvisor.Api/` by comparing the request's
+      `X-User-Id` header against the stored owner, returning `404` on mismatch (depends on
+      T104).
+- [X] T111 Implement Google sign-in in `src/WebApp/WebApp.Blazor/` — cookie authentication +
+      OpenID Connect challenge against Google, a global `[Authorize]` fallback policy covering
+      every page, and attaching the signed-in user's identity token as
+      `Authorization: Bearer` on every call to Gateway (FR-030, research.md §17) (depends on
+      T103).
+- [X] T112 Implement JWT Bearer validation in `src/Gateway/Gateway.Api/` against Google's OIDC
+      discovery document, extracting the token's `sub` claim and forwarding it as `X-User-Id`
+      plus the internal API key on every downstream call (depends on T109, T111).
+- [X] T113 Implement FR-024's concurrent-message rejection — a per-session in-progress marker
+      (e.g., a guarded flag on `ConversationSession` or a short-lived lock keyed by
+      `sessionId`) in `src/ProductAdvisor/ProductAdvisor.Api/`, returning `409` for a second
+      request that arrives while the first is still being processed for that session (depends
+      on T105).
+- [X] T114 Implement the `generate_checkout_link` MCP tool + `CheckoutLink` value object in
+      `src/ProductAdvisor/ProductAdvisor.Infrastructure/`, resolving ids against Catalog and a
+      configurable checkout base URL; add the `checkoutLink` turn-response shape in
+      `src/ProductAdvisor/ProductAdvisor.Application/` (ConversationApiMapper) and render it in
+      `src/WebApp/WebApp.Blazor/` alongside the existing recommendation/comparison renderings
+      (FR-025/FR-023, depends on T106).
+- [X] T115 Wire `OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_HEADERS` (`sync: false`)
+      through `render.yaml` for all five services, and document the chosen OTLP-compatible
+      backend's setup (e.g., Grafana Cloud) in `README.md`/`quickstart.md` (research.md §16)
+      (depends on T107).
+- [X] T116 Add a global exception-handling middleware (`problem+json` response, correlation-id-
+      tagged error log) to `ProductCatalog.Api`, `PricingAvailability.Api`, `ProductAdvisor.Api`,
+      and `Gateway.Api` — mirroring `WebApp.Blazor`'s existing `UseExceptionHandler` — so an
+      unhandled exception is always logged once and never leaks a raw stack trace in Production
+      (FR-027/FR-032, research.md §16) (depends on T107).
+- [X] T117 Verify FR-026's accessibility baseline (keyboard-navigable, semantic HTML, readable
+      focus order) holds across `Home.razor`, `ProductPicker.razor`, and `ProductDetail.razor` —
+      confirmed: only native `<input>`/`<button>`/`<a>`/`<select>`/`<form>` elements are used
+      throughout, including the new checkout-link and sign-out controls; no gap found.
+- [ ] T118 Manually re-verify against the live stack: sign in with a real Google account
+      end-to-end; confirm a second browser/incognito session signed in as a different Google
+      account cannot read the first session's conversation; confirm a direct `curl` to
+      Catalog/Pricing/Advisor without the internal API key is refused; confirm "check out with
+      the first one" after a recommendation returns a working checkout link; confirm logs/traces
+      for a real request appear in the configured observability backend.
+      Partially done against the real docker-compose stack with a real LLM (this environment has
+      no real Google OAuth credentials or observability backend to finish the rest): a real
+      chat→recommendation turn and a chat→checkout-link turn both succeeded end-to-end; a second
+      identity could not read the first's session (404); a direct curl to Catalog without the
+      internal key was refused (401); a deliberately-provoked error was logged with its
+      correlation id. Found and fixed two real bugs in the process (not test-only issues): (1)
+      each service's `UseExceptionHandler()`/`UseCorrelationId()` were registered in the wrong
+      order, so an error's own log line never carried the request's correlation id; (2) the E2E
+      test JWT scheme was missing `MapInboundClaims = false`, so the `sub` claim silently
+      remapped and Gateway→Advisor calls lost `X-User-Id`, breaking every chat turn through
+      Gateway. Still needs a human with real `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and an
+      OTLP backend to confirm the real Google sign-in redirect and observability export.
+
+**Checkpoint**: The whole system requires a verified identity at both the user-facing and
+internal boundaries, sessions are private to their owner, observability data reaches a real
+backend, concurrent turns on one session can't interleave, and checkout link generation closes
+the loop from recommendation/comparison to purchase.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -649,6 +773,11 @@ nonexistent product and confirm an honest "not found" response.
   `Home.razor` rendering it fixes) — no dependency on Phase 4/4.5/5, so it may proceed in any
   order relative to them; completed before Phase 6 (Polish).
 - **Polish (Phase 6)**: Depends on all desired user stories being complete.
+- **Access Control, Observability Hardening & Checkout Link (Phase 7)**: Depends on Phase 6 (it
+  hardens/extends the already-polished system) and, for the checkout-link tool specifically, on
+  Phase 4.5's `LastSearchResults` (T096) and Phase 4.6's per-turn structured rendering (T101).
+  Every other user story remains independently testable underneath the new auth boundary — the
+  boundary changes *who* can reach a story, not what the story does once reached.
 
 ### Within Each User Story
 
@@ -711,6 +840,8 @@ Task: "Implement GET /api/pricing/offers endpoints in src/PricingAvailability/Pr
 3. Add User Story 2 → validate independently → deploy/demo.
 4. Add User Story 3 → validate independently → deploy/demo.
 5. Polish (Phase 6) → full observability, resilience, and CI/CD hardening.
+6. Phase 7 → access control (Google sign-in + internal API key), a real observability backend,
+   concurrent-message rejection, and checkout-link generation.
 
 ### Parallel Team Strategy
 
