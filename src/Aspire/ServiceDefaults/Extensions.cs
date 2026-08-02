@@ -122,19 +122,23 @@ public static class Extensions
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        // Adding health checks endpoints to applications in non-development environments has security implications.
-        // See https://aka.ms/aspire/healthchecks for details before enabling these endpoints in non-development environments.
+        // Adding the FULL health checks endpoint (which can report per-dependency details) to
+        // non-development environments has security implications — see
+        // https://aka.ms/aspire/healthchecks — so it stays development-only.
         if (app.Environment.IsDevelopment())
         {
             // All health checks must pass for app to be considered ready to accept traffic after starting
             app.MapHealthChecks(HealthEndpointPath);
-
-            // Only health checks tagged with the "live" tag must pass for app to be considered alive
-            app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
-            {
-                Predicate = r => r.Tags.Contains("live")
-            });
         }
+
+        // The "live" liveness check reports only a plain Healthy/Unhealthy with no dependency
+        // detail, so it's safe in every environment — and it must be, since Render's Blueprint
+        // health check hits a path on every deployed service by default (no route at "/" would
+        // otherwise mark every backend service permanently unhealthy in production).
+        app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = r => r.Tags.Contains("live")
+        });
 
         return app;
     }

@@ -24,9 +24,14 @@ public sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<Correl
         context.Items[HttpContextItemKey] = correlationId;
         context.Response.Headers[HeaderName] = correlationId;
 
-        using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+        // The structured-message-template overload (not a raw Dictionary) so the scope actually
+        // renders as "CorrelationId:<value>" in log output — a Dictionary's default ToString()
+        // just prints its type name, silently defeating the whole point of this scope.
+#pragma warning disable CA1848 // Intentional: once per HTTP request, not a hot logging path — a LoggerMessage delegate would add ceremony with no measurable benefit here.
+        using (logger.BeginScope("CorrelationId:{CorrelationId}", correlationId))
         {
             await next(context);
         }
+#pragma warning restore CA1848
     }
 }

@@ -22,12 +22,20 @@ public sealed class ConversationOrchestrator(
         products using ONLY the provided tools. Never state a price, availability,
         specification, rating, or comparison delta that did not come from a tool result.
         If you do not yet know the product category and budget, ask exactly one focused
-        clarifying question instead of calling get_recommendations. Once you call a tool,
-        narrate its result faithfully without adding facts it did not return.
+        clarifying question instead of calling get_recommendations. Category and budget are the
+        ONLY information required before calling get_recommendations — once both are known, call
+        it immediately; do not ask about optional feature preferences first, since
+        get_recommendations already surfaces trade-offs for anything not specified. Once you
+        call a tool, narrate its result faithfully without adding facts it did not return.
         When the user asks to compare two or more named products, first resolve their product
         ids (e.g., via search_products) and then call compare_products — do not write your own
         side-by-side comparison, rating, or delta from search/detail results alone; those are
         only ever computed by compare_products.
+        When the user asks about a single named product (its price, availability, or a
+        characteristic) rather than requesting a recommendation, call search_products with just
+        that name as the free-text query — category is optional, do not ask for it first. If
+        nothing matches, tell the user the product could not be found rather than asking a
+        clarifying question or guessing.
         """;
 
     public async Task<AdvisorTurnResult> ProcessMessageAsync(

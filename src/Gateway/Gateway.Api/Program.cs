@@ -97,6 +97,30 @@ app.MapGet("/api/chat/{sessionId:guid}", async (Guid sessionId, AdvisorApiClient
     return snapshot is null ? Results.NotFound() : Results.Ok(snapshot.Value);
 });
 
+// GET /api/products/{productId} — plain product-detail composition (US3, outside the chat
+// flow, e.g. a "view product" link from a recommendation): concurrent Catalog+Pricing fetch,
+// 404 only if Catalog has no such product; a Pricing outage degrades to unverified price/
+// availability rather than failing the whole request (constitution Principle V).
+app.MapGet("/api/products/{productId:guid}", async Task<IResult> (
+    Guid productId, CatalogApiClient catalog, PricingApiClient pricing, CancellationToken ct) =>
+{
+    var detailTask = catalog.GetProductDetailAsync(productId, ct);
+    var offerTask = pricing.GetOfferAsync(productId, ct);
+    await Task.WhenAll(detailTask, offerTask);
+
+    var detail = await detailTask;
+    if (detail is null)
+    {
+        return Results.NotFound();
+    }
+
+    var offer = await offerTask;
+    return Results.Ok(new ProductCandidateDto(
+        detail.ProductId, detail.Name, detail.Brand, detail.Category, detail.Specifications,
+        Price: offer?.Price, PriceVerified: offer is not null,
+        Availability: offer?.Availability, AvailabilityVerified: offer is not null));
+});
+
 // GET /api/products/search — explicit product-picker composition (FR-020, contracts/gateway-bff-api.md):
 // no chat, no LLM involvement at all. Catalog narrows by category/text/characteristics, then
 // this endpoint batch-fetches Pricing offers for that candidate set and filters/sorts/limits by

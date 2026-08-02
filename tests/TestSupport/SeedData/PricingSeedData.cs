@@ -24,6 +24,8 @@ public static class PricingSeedData
     public static readonly Guid SonyWh1000Xm5OfferId = Guid.Parse("00000000-0000-0000-0004-00000000000c");
     public static readonly Guid BoseQuietComfortUltraOfferId = Guid.Parse("00000000-0000-0000-0004-00000000000d");
     public static readonly Guid AirPodsMaxOfferId = Guid.Parse("00000000-0000-0000-0004-00000000000e");
+    public static readonly Guid GalaxyA15OfferId = Guid.Parse("00000000-0000-0000-0004-00000000000f");
+    public static readonly Guid RedmiNote13OfferId = Guid.Parse("00000000-0000-0000-0004-000000000010");
 
     public static IReadOnlyList<Offer> Offers { get; } = BuildOffers();
 
@@ -93,12 +95,23 @@ public static class PricingSeedData
             AirPodsMaxOfferId, CatalogSeedData.AirPodsMaxId,
             new Money(18000m, "UAH"), now, "seed");
 
+        // Budget-tier smartphones — real, in-stock candidates well below the flagships above, so
+        // a low-budget query has something genuine to match against.
+        var galaxyA15 = new Offer(
+            GalaxyA15OfferId, CatalogSeedData.GalaxyA15Id,
+            new Money(6000m, "UAH"), now, "seed", StockStatus.InStock);
+
+        var redmiNote13 = new Offer(
+            RedmiNote13OfferId, CatalogSeedData.RedmiNote13Id,
+            new Money(5500m, "UAH"), now, "seed", StockStatus.InStock);
+
         return
         [
             galaxyS24, pixel9, iphone15, xps13,
             xiaomi14, onePlus12, surfaceLaptop6, thinkPadX1Carbon,
             ipadAir, galaxyTabS9, xiaomiPad6,
             sonyWh1000Xm5, boseQuietComfortUltra, airPodsMax,
+            galaxyA15, redmiNote13,
         ];
     }
 }

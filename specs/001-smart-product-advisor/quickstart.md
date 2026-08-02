@@ -76,8 +76,8 @@ docker compose up --build
 
 ## Validation Scenario 6 — Partial failure is honest, not a crash (Constitution Principle V)
 
-1. Stop the Pricing service container only (`docker compose stop pricing-availability-api`, or
-   pause its Aspire resource).
+1. Stop the Pricing service container only (`docker compose stop pricing-api`, or pause its
+   Aspire resource).
 2. Repeat Validation Scenario 1.
 3. **Expect**: a `200 recommendation` response still returns, but items show
    `priceVerified: false` / `availabilityVerified: false` instead of a stale or fabricated
@@ -87,8 +87,12 @@ docker compose up --build
 ## Running the automated test suite
 
 ```bash
-dotnet test                     # unit + application + contract tests (fast, no containers needed beyond Testcontainers-managed Postgres)
-docker compose -f docker-compose.yml -f docker-compose.ci.yml up --build --abort-on-container-exit  # EndToEnd.Tests cross-service scenarios
+dotnet test src/ProductAdvisor.slnx   # unit + application + contract tests (fast, no manually-running stack needed — contract tests use their own Testcontainers-managed Postgres)
+
+# EndToEnd.Tests cross-service scenarios — needs the real stack up and a configured LLM provider:
+docker compose up --build -d
+dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj
+docker compose down -v
 ```
 
 All of the scenarios above have a corresponding automated test in

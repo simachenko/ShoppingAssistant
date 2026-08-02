@@ -14,6 +14,16 @@ public sealed record CatalogProductDto(
 
 public sealed record CatalogSearchResponse(IReadOnlyList<CatalogProductDto> Items, int Page, int PageSize, int TotalCount);
 
+public sealed record CatalogProductDetailDto(
+    Guid ProductId,
+    string Name,
+    string Brand,
+    string Category,
+    Guid CategoryId,
+    string Description,
+    bool IsActive,
+    IReadOnlyList<CatalogSpecificationDto> Specifications);
+
 /// <summary>
 /// A structured characteristic condition (FR-020) — `Operator` is one of "eq"/"gte"/"lte"/
 /// "between", matching Catalog's wire contract exactly.

@@ -20,6 +20,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- These tests hit the same live docker-compose stack, and some (PartialFailureResilienceTests)
+         stop/start a real container mid-test — must run sequentially, never in parallel with each
+         other, or one test's outage simulation corrupts another's assumption that the stack is up. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TestSupport\TestSupport.csproj" />
     <ProjectReference Include="..\..\src\ProductCatalog\ProductCatalog.Infrastructure\ProductCatalog.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\PricingAvailability\PricingAvailability.Infrastructure\PricingAvailability.Infrastructure.csproj" />

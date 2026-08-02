@@ -8,6 +8,7 @@ services:
     dockerfilePath: ./src/ProductCatalog/ProductCatalog.Api/Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /alive
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
@@ -20,6 +21,7 @@ services:
     dockerfilePath: ./src/PricingAvailability/PricingAvailability.Api/Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /alive
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
@@ -32,6 +34,7 @@ services:
     dockerfilePath: ./src/ProductAdvisor/ProductAdvisor.Api/Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /alive
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
@@ -60,6 +63,7 @@ services:
     dockerfilePath: ./src/Gateway/Gateway.Api/Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /alive
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production

@@ -8,6 +8,15 @@
 
 **Input**: User description: "Build a smart product advisor for a retail website that helps users choose the most suitable product based on their needs, preferences, and budget. The advisor should answer questions about product characteristics, compare several products using consistent criteria, check current prices and availability, and provide clear, reasoned recommendations. Users should be able to describe their needs in natural language, for example: \"I need a smartphone with a good camera and a budget of up to 15,000 UAH.\" When important information is missing, the advisor should ask focused clarification questions before recommending products. Recommendations should explain why each suggested product matches the user's requirements, highlight important advantages and trade-offs, and respect explicit constraints such as budget, required features, and availability. The advisor must rely on available product data, clearly communicate when information cannot be verified, and never invent specifications, prices, or stock status. The goal is to reduce choice overload, make product comparison easier, and help users make confident and informed purchase decisions."
 
+## Clarifications
+
+### Session 2026-08-02
+
+- Q: Does conversation history need special PII handling (redaction, encryption, limited retention) beyond ordinary data, or is it treated as ordinary application data? → A: No special PII handling required — conversation text (product needs, budgets) is treated as ordinary application data, not sensitive personal data.
+- Q: What should happen if a second message arrives for the same session while a prior turn is still being processed? → A: Reject/ignore the second message — one turn completes before the next begins for a given session.
+- Q: Is checkout/purchasing in scope for this feature? → A: Purchase processing itself is out of scope, but the advisor MUST be able to generate a checkout link for one or more products the user picked or that were most recently shown (reusing the session's retained result set, FR-022), with those products' identifiers encoded as URL query parameters, so the user can proceed to buy them outside the advisor.
+- Q: What is the accessibility bar for the UI? → A: Baseline only — keyboard-navigable, semantic HTML, readable focus order; no formal WCAG conformance level required.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Get a Recommendation from a Natural-Language Need (Priority: P1)
@@ -57,6 +66,21 @@ A shopper asks a targeted question about a specific product's characteristics, c
 
 ---
 
+### User Story 4 - Get a Checkout Link for Selected Products (Priority: P4)
+
+A shopper who has been shown recommendations, a comparison, or search results — or who has explicitly picked one or more products — asks to proceed toward buying them, and the advisor returns a checkout link that identifies exactly those products.
+
+**Why this priority**: This closes the loop from "confident decision" to "action," but depends entirely on the recommendation/comparison/search flows already having identified real products — it adds no value on its own and is the least-used capability of the four.
+
+**Independent Test**: Can be tested by, after a recommendation/comparison/search response, asking to proceed to checkout for one or more of the shown products (by name or by ordinal/descriptive reference, e.g., "the first one") and confirming the returned link's product identifiers exactly match the ones referenced.
+
+**Acceptance Scenarios**:
+
+1. **Given** the session has a most-recently-shown set of products (from a search, recommendation, or comparison), **When** the user asks to check out with one or more of them (by name or by ordinal/descriptive reference), **Then** the advisor returns a checkout link whose query parameters identify exactly those products' identifiers.
+2. **Given** the user asks to check out with a product that was never shown or picked in this session, **When** the advisor processes the request, **Then** it asks the user to first identify or search for the product rather than guessing which product is meant.
+
+---
+
 ### Edge Cases
 
 - What happens when the user's stated budget is below the price of the cheapest relevant product? The advisor MUST communicate that no match exists rather than recommending an over-budget item.
@@ -69,6 +93,9 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - What happens when a follow-up reference to previously shown products ("the first two", "the cheaper one") is made with no prior search, recommendation, or comparison in the session? The advisor MUST ask which products are meant rather than guessing an identifier.
 - What happens when a characteristic filter names an attribute that isn't defined for the category being searched? The system MUST treat it as zero matches for that condition rather than silently ignoring the filter.
 - What happens when a price range filter would exclude every candidate that otherwise matches the category and characteristics? The system MUST still apply the price filter and report the honest "no match" outcome rather than relaxing it to "be helpful."
+- What happens to a previously shown recommendation card list or comparison table in the conversation view when the user sends a further message (even an unrelated one)? The prior structured rendering MUST remain visible in its place in the conversation rather than disappearing once a new turn's result arrives.
+- What happens when a second message for the same session arrives while a prior turn for that session is still being processed? The system MUST reject or ignore the second message rather than processing both concurrently — one turn completes before the next begins for a given session.
+- What happens when the user asks to check out with no prior search, recommendation, or comparison in the session (or references a product never shown)? The advisor MUST ask which products are meant rather than guessing an identifier — the same honesty pattern as an ordinal follow-up with nothing to resolve against.
 
 ## Requirements *(mandatory)*
 
@@ -96,6 +123,10 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **FR-020**: The system MUST support searching for products using explicit, structured filters — category, price range, and one or more product-characteristic conditions (e.g., a minimum camera resolution) — with results limited to products that satisfy every stated filter.
 - **FR-021**: The system MUST allow resolving a product category's identity and its comparable characteristics by name, so a category reference can be grounded to a concrete identifier without the language model guessing one.
 - **FR-022**: The advisor MUST retain the most recent set of product identifiers shown to the user (from a search, recommendation, or comparison) within the conversation session, so a follow-up reference to that set (e.g., "the first two", "the cheaper one") resolves against known identifiers rather than requiring the language model to reconstruct them from prior prose.
+- **FR-023**: The conversation view MUST retain each turn's structured rendering (recommendation cards, comparison table, or clarification prompt) in place within the conversation history as further turns occur; a later turn's result MUST NOT cause an earlier turn's structured rendering to disappear from view.
+- **FR-024**: The system MUST reject or ignore a second message submitted for a session while a prior turn for that same session is still being processed, so that two turns for one session never process concurrently.
+- **FR-025**: The system MUST be able to generate a checkout link for one or more products the user has picked or that were most recently shown in the session (reusing the retained result set from FR-022), encoding those products' identifiers as URL query parameters, so the user can proceed to purchase them outside the advisor. Purchase processing, payment, cart management, and order fulfillment themselves are out of scope for this system.
+- **FR-026**: The conversation and product-picker UI MUST be keyboard-navigable with a readable focus order, using semantic HTML elements for interactive controls (inputs, buttons, links) rather than non-semantic elements requiring custom keyboard handling; no formal WCAG conformance level is required.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -105,6 +136,7 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **Comparison**: A set of two or more products evaluated against one shared list of criteria, with each product's value recorded for every criterion. Reachable both through conversation and through direct invocation with a known product set; both paths produce identical results because both call the same deterministic computation.
 - **Clarification Question**: A single focused question raised when essential information is missing, tied to the specific missing piece of the User Need.
 - **Search Filter**: A structured description of what a product search must satisfy — category, free-text keywords, a price range, and zero or more characteristic conditions (attribute name, comparison operator, value) — evaluated deterministically; never inferred or approximated by the language model.
+- **Checkout Link**: A URL to the retailer's own checkout/purchase flow, carrying the identifiers of one or more products the user picked or was most recently shown, as query parameters — constructed deterministically from known identifiers, never guessed. This system does not implement the destination checkout flow itself.
 
 ## Success Criteria *(mandatory)*
 
@@ -122,10 +154,16 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - **SC-010**: Comparing the same set of products twice — once triggered through conversation and once invoked directly — yields byte-identical ratings, deltas, and rankings, proving the computation does not depend on the language model or on which path invoked it.
 - **SC-011**: 100% of products returned by a filtered search satisfy every stated filter condition (category, price range, and characteristic conditions) — zero results violate a stated filter.
 - **SC-012**: When a session has a prior search, recommendation, or comparison result, 100% of ordinal follow-up references ("the first one", "the cheaper of the two") resolve to the correct previously-shown product.
+- **SC-013**: After N conversation turns each producing a structured rendering (recommendation cards, comparison table, or clarification prompt), all N renderings remain visible and correctly attributed to their turn — none are removed or overwritten by a later turn's result.
+- **SC-014**: When a second message for a session is submitted while a prior turn for that session is still processing, 100% of such attempts result in exactly one turn being processed at a time for that session — never two turns' effects interleaved or applied out of order.
+- **SC-015**: 100% of generated checkout links encode exactly the product identifiers the user referenced (by name or by ordinal/session-memory reference) — no extra, missing, or incorrect product ids.
 
 ## Assumptions
 
 - The advisor operates against the retailer's own approved product data (prices, specifications, stock); it is not expected to source facts from arbitrary external sites.
+- Conversation history (a session's messages, requirements, and shown results) is treated as ordinary application data, not sensitive personal data — no special PII redaction, encryption, or limited-retention handling is required beyond what the constitution already requires for credentials/secrets (never conversation text).
+- A checkout link (FR-025) points to the retailer's own existing checkout/purchase flow; this system is responsible only for constructing that link from known product identifiers, never for payment, cart, or order processing themselves.
+- Accessibility (FR-026) is a baseline, not a compliance target: using native, semantic HTML controls (inputs, buttons, links) rather than custom widgets is sufficient; no accessibility audit or formal WCAG conformance level is in scope for this project.
 - The product catalog can span multiple product categories (not limited to smartphones); comparison criteria are defined per category based on the attributes available for that category.
 - "Essential information" for an initial recommendation is, at minimum, product category and budget; feature preferences refine the recommendation but are not always required to attempt one.
 - When no product fits the stated constraints, the advisor discloses the gap and may suggest the closest alternatives only if explicitly labeled as not fully matching; it will not silently exceed a stated budget.
@@ -136,3 +174,4 @@ A shopper asks a targeted question about a specific product's characteristics, c
 - Characteristic filter conditions (FR-020) support equality, greater-than-or-equal, less-than-or-equal, and a numeric range; this covers the catalog's existing numeric and simple categorical attributes without introducing a general-purpose query language.
 - The session's memory of prior search/recommendation/comparison results (FR-022) holds only the most recently shown set, not a full history of every result ever shown in the conversation.
 - Explanatory narration attached to a directly-invoked comparison (FR-018/FR-019) is optional and best-effort: if it cannot be produced, the comparison's structured data is still returned in full rather than withholding the whole response.
+- Structured-rendering retention (FR-023) is a client-side presentation concern layered on top of FR-017; the backend already returns each turn's full structured result independently, so retaining prior renderings requires no new backend data, only that the conversation view keep what it already received instead of discarding it on the next turn.

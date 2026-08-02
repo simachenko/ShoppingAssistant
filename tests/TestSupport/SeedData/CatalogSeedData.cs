@@ -41,6 +41,8 @@ public static class CatalogSeedData
     public static readonly Guid SonyWh1000Xm5Id = Guid.Parse("00000000-0000-0000-0003-00000000000c");
     public static readonly Guid BoseQuietComfortUltraId = Guid.Parse("00000000-0000-0000-0003-00000000000d");
     public static readonly Guid AirPodsMaxId = Guid.Parse("00000000-0000-0000-0003-00000000000e");
+    public static readonly Guid GalaxyA15Id = Guid.Parse("00000000-0000-0000-0003-00000000000f");
+    public static readonly Guid RedmiNote13Id = Guid.Parse("00000000-0000-0000-0003-000000000010");
 
     public static IReadOnlyList<Category> Categories { get; } =
     [
@@ -166,12 +168,30 @@ public static class CatalogSeedData
         airPodsMax.AddSpecification(new Specification("weight_g", "384", "g"));
         airPodsMax.Activate();
 
+        // Budget-tier smartphones — widen the Smartphones price range well below the flagships
+        // above, so a low-budget query has real affordable candidates to match against instead
+        // of every smartphone being a flagship.
+        var galaxyA15 = new Product(GalaxyA15Id, "Galaxy A15", SamsungBrandId, SmartphonesCategoryId,
+            "Samsung's budget smartphone with a large battery.");
+        galaxyA15.AddSpecification(new Specification("camera_mp", "50", "MP"));
+        galaxyA15.AddSpecification(new Specification("battery_mah", "5000", "mAh"));
+        galaxyA15.AddSpecification(new Specification("storage_gb", "128", "GB"));
+        galaxyA15.Activate();
+
+        var redmiNote13 = new Product(RedmiNote13Id, "Redmi Note 13", XiaomiBrandId, SmartphonesCategoryId,
+            "Xiaomi's budget smartphone with a high-resolution camera.");
+        redmiNote13.AddSpecification(new Specification("camera_mp", "108", "MP"));
+        redmiNote13.AddSpecification(new Specification("battery_mah", "5000", "mAh"));
+        redmiNote13.AddSpecification(new Specification("storage_gb", "128", "GB"));
+        redmiNote13.Activate();
+
         return
         [
             galaxyS24, pixel9, iphone15, xps13,
             xiaomi14, onePlus12, surfaceLaptop6, thinkPadX1Carbon,
             ipadAir, galaxyTabS9, xiaomiPad6,
             sonyWh1000Xm5, boseQuietComfortUltra, airPodsMax,
+            galaxyA15, redmiNote13,
         ];
     }
 }

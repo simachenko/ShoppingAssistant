@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using Polly.CircuitBreaker;
 using Polly.Timeout;
@@ -7,6 +8,30 @@ namespace Gateway.Api.Clients;
 /// <summary>Thin HTTP client to the Pricing and Availability service — fetch only, no computation.</summary>
 public sealed class PricingApiClient(HttpClient httpClient)
 {
+    /// <summary>
+    /// Null both when Pricing has no offer on record (404) and when Pricing is entirely
+    /// unreachable — either way the caller has no verified price/availability to show, and both
+    /// cases degrade to an honest "not verified" rather than a failure (constitution Principle V).
+    /// </summary>
+    public async Task<PricingOfferDto?> GetOfferAsync(Guid productId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await httpClient.GetAsync($"/api/pricing/offers/{productId}", cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadFromJsonAsync<PricingOfferDto>(cancellationToken);
+        }
+        catch (Exception ex) when (IsPricingUnreachable(ex))
+        {
+            return null;
+        }
+    }
+
     public async Task<PricingBatchResponse> GetOffersAsync(IReadOnlyCollection<Guid> productIds, CancellationToken cancellationToken)
     {
         if (productIds.Count == 0)

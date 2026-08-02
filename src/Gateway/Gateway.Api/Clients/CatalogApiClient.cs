@@ -23,4 +23,16 @@ public sealed class CatalogApiClient(HttpClient httpClient)
         var result = await response.Content.ReadFromJsonAsync<CatalogSearchResponse>(cancellationToken);
         return result ?? new CatalogSearchResponse([], request.Page, request.PageSize, 0);
     }
+
+    public async Task<CatalogProductDetailDto?> GetProductDetailAsync(Guid productId, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.GetAsync($"/api/catalog/products/{productId}", cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CatalogProductDetailDto>(cancellationToken);
+    }
 }

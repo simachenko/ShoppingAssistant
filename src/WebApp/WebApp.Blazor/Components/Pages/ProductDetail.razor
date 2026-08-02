@@ -1,0 +1,69 @@
+@page "/products/{ProductId:guid}"
+@rendermode InteractiveServer
+@using WebApp.Blazor.Models
+@using WebApp.Blazor.Services
+@inject GatewayApiClient GatewayApi
+
+<PageTitle>@(_product?.Name ?? "Product") — Smart Product Advisor</PageTitle>
+
+@if (_loading)
+{
+    <p>Loading…</p>
+}
+else if (_product is null)
+{
+    <div class="alert alert-warning">
+        We couldn't find that product in our catalog. It may no longer be available, or the link
+        may be incorrect.
+    </div>
+    <p><a href="products">Back to search</a></p>
+}
+else
+{
+    <h1>@_product.Name</h1>
+    <p>@_product.Brand — @_product.Category</p>
+
+    <p>
+        @if (_product.PriceVerified && _product.Price is not null)
+        {
+            <span>@_product.Price.Amount @_product.Price.Currency</span>
+        }
+        else
+        {
+            <em>Price could not be verified</em>
+        }
+        —
+        @if (_product.AvailabilityVerified)
+        {
+            <span>@_product.Availability</span>
+        }
+        else
+        {
+            <em>Availability could not be verified</em>
+        }
+    </p>
+
+    <h3>Specifications</h3>
+    <ul>
+        @foreach (var spec in _product.Specifications)
+        {
+            <li>@spec.Key: @spec.Value@(string.IsNullOrEmpty(spec.Unit) ? "" : $" {spec.Unit}")</li>
+        }
+    </ul>
+
+    <p><a href="products">Back to search</a></p>
+}
+
+@code {
+    [Parameter]
+    public Guid ProductId { get; set; }
+
+    private bool _loading = true;
+    private ProductCandidateDto? _product;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _product = await GatewayApi.GetProductDetailAsync(ProductId, CancellationToken.None);
+        _loading = false;
+    }
+}

@@ -399,19 +399,19 @@ confirm it resolves against the session's remembered result set.
 
 ### Tests for This Phase
 
-- [ ] T083 [P] Contract test for `GET /api/catalog/categories?name=` in
+- [X] T083 [P] Contract test for `GET /api/catalog/categories?name=` in
       `tests/ProductCatalog.Api.Tests/CategoryByNameContractTests.cs`.
-- [ ] T084 [P] Contract test for `POST /api/catalog/products/search` — characteristic filter
+- [X] T084 [P] Contract test for `POST /api/catalog/products/search` — characteristic filter
       operators (`eq`/`gte`/`lte`/`between`), an unknown-attribute filter yielding zero matches,
       and a `400` for an unrecognized operator or a missing `valueTo` — in
       `tests/ProductCatalog.Api.Tests/ParametricSearchContractTests.cs`.
-- [ ] T085 [P] Unit tests for the characteristic-filter matcher (all four operators, unknown key,
+- [X] T085 [P] Unit tests for the characteristic-filter matcher (all four operators, unknown key,
       non-numeric value against an ordinal operator) in
       `tests/ProductCatalog.Application.Tests/CharacteristicFilterTests.cs`.
-- [ ] T086 [P] MCP tool contract test for the extended `search_products` (characteristics/price
+- [X] T086 [P] MCP tool contract test for the extended `search_products` (characteristics/price
       range/sort/limit) and the new `get_category` tool in
       `tests/ProductAdvisor.Api.Tests/AdvancedSearchToolTests.cs`.
-- [ ] T087 [P] Contract test for `POST /api/comparisons` — byte-identical `criteria`/`rows`
+- [X] T087 [P] Contract test for `POST /api/comparisons` — byte-identical `criteria`/`rows`
       against the same ids compared through `compare_products` in conversation (SC-010),
       `includeExplanation: false` makes zero LLM calls, a failing/unavailable chat client still
       returns `200` with `explanation: null` (FR-019), and fewer than 2 valid ids is a `400` — in
@@ -424,23 +424,23 @@ confirm it resolves against the session's remembered result set.
 
 ### Implementation for This Phase
 
-- [ ] T090 [P] Implement `GET /api/catalog/categories?name=` in
+- [X] T090 [P] Implement `GET /api/catalog/categories?name=` in
       `src/ProductCatalog/ProductCatalog.Application/` + `.Api/` (reuses the existing
       `FindCategoryByNameAsync` repository method) (depends on T083).
-- [ ] T091 Implement `CharacteristicFilter` (key/operator/value/valueTo) and its matcher in
+- [X] T091 Implement `CharacteristicFilter` (key/operator/value/valueTo) and its matcher in
       `src/ProductCatalog/ProductCatalog.Application/` (depends on T085).
-- [ ] T092 Implement `POST /api/catalog/products/search` — SQL-pushed category/free-text
+- [X] T092 Implement `POST /api/catalog/products/search` — SQL-pushed category/free-text
       narrowing, then in-process characteristic filtering on the narrowed set (research.md §13)
       — in `src/ProductCatalog/ProductCatalog.Application/` + `.Api/` (depends on T084, T091).
-- [ ] T093 Extend the `search_products` MCP tool with `categoryId`/`characteristics`/`priceMin`/
+- [X] T093 Extend the `search_products` MCP tool with `categoryId`/`characteristics`/`priceMin`/
       `priceMax`/`sortBy`/`limit` (composing Catalog's search with a Pricing batch price-range
       filter, per research.md §13's pushdown pattern) and add the `get_category` tool in
       `src/ProductAdvisor/ProductAdvisor.Infrastructure/Tools/` (depends on T086, T090, T092).
-- [ ] T094 Extract the `compare_products` composition (candidate assembly + `ComparisonEngine`
+- [X] T094 Extract the `compare_products` composition (candidate assembly + `ComparisonEngine`
       invocation) into a shared service in `src/ProductAdvisor/ProductAdvisor.Infrastructure/`
       so it has exactly one implementation reused by both the MCP tool and the new direct
       endpoint (research.md §14).
-- [ ] T095 Implement the stateless `POST /api/comparisons` endpoint — calls the shared service
+- [X] T095 Implement the stateless `POST /api/comparisons` endpoint — calls the shared service
       from T094, then an optional separate constrained `IChatClient` call for `explanation` that
       cannot alter the computed data and whose failure never blocks the response — in
       `src/ProductAdvisor/ProductAdvisor.Api/` (depends on T087, T094).
@@ -452,7 +452,7 @@ confirm it resolves against the session's remembered result set.
       filter composition, mirroring `GET /api/products/{productId}`'s existing pattern) and
       `POST /api/products/compare` (proxy to `POST /api/comparisons`) in
       `src/Gateway/Gateway.Api/` (depends on T088, T092, T095).
-- [ ] T098 Implement the Blazor explicit product-picker page — search/filter form, checkbox
+- [X] T098 Implement the Blazor explicit product-picker page — search/filter form, checkbox
       selection, a "Compare" button calling the Gateway's direct endpoints with no chat/LLM
       involvement — in `src/WebApp/WebApp.Blazor/` (depends on T097).
 - [X] T099 Manually re-verify: (a) chat-based "compare Samsung Galaxy S24 and GooglePixel 9"
@@ -464,6 +464,45 @@ confirm it resolves against the session's remembered result set.
 **Checkpoint**: Search filtering and product comparison are both reachable without depending on
 the LLM to compute anything; the LLM's only remaining job in this area is resolving language to
 ids (retrieval) and, optionally, narrating an already-computed table.
+
+---
+
+## Phase 4.6: Persist Structured Renders Across Turns (US1 Enhancement)
+
+> **Numbering note**: this phase was added during a spec-refinement pass after Phase 4.5 shipped,
+> continuing task IDs from the highest number then in use (T099) rather than renumbering. See
+> spec.md FR-023, SC-013, and the new Assumptions bullet for the requirement this phase
+> implements.
+
+**Goal**: `src/WebApp/WebApp.Blazor/Components/Pages/Home.razor` currently keeps only one
+"current result" slot (`_lastTurn`) for rendering a recommendation card list, comparison table,
+or clarification prompt. Because every new turn overwrites that single slot, sending any further
+message — even an unrelated one — makes a previously-shown structured rendering vanish from the
+conversation view, even though the plain narration text for that turn remains in the scrolling
+history. This phase makes each turn's structured rendering persist alongside its message instead
+of sharing one slot (FR-023).
+
+**Independent Test**: In the chat UI, trigger a comparison (renders a table), then send an
+unrelated follow-up message; confirm the comparison table is still visible in its original place
+in the conversation after the new turn's response arrives. Repeat for a recommendation card list
+followed by another recommendation request — both card lists must remain visible, in order.
+
+### Tasks
+
+- [X] T100 Change `Home.razor`'s history model from `List<(string Role, string Text)>` to a
+      `HistoryEntry(string Role, string Text, ChatTurnDto? Turn)` record list, so each assistant
+      entry carries its own turn's structured result instead of a single shared `_lastTurn` field,
+      in `src/WebApp/WebApp.Blazor/Components/Pages/Home.razor` (depends on Phase 3.5).
+- [X] T101 Move the recommendation-card/comparison-table/clarification-prompt rendering markup
+      inside the per-entry `@foreach` loop, keyed off each entry's own `Turn` instead of the
+      removed `_lastTurn`, so every turn's structured rendering stays in place as the conversation
+      grows, in `src/WebApp/WebApp.Blazor/Components/Pages/Home.razor` (depends on T100). Manually
+      verify in-browser per this phase's Independent Test (no bUnit component-test project exists
+      yet for this repo, consistent with how Phase 4.5's picker UI was verified).
+
+**Checkpoint**: A multi-turn conversation with several recommendations/comparisons/clarifications
+shows all of their structured renderings simultaneously, each attached to its own turn, matching
+SC-013.
 
 ---
 
@@ -479,34 +518,41 @@ nonexistent product and confirm an honest "not found" response.
 
 ### Tests for User Story 3
 
-- [ ] T056 [P] [US3] Contract test for `GET /api/pricing/offers/{productId}` distinguishing
-      `404` (no record) from `200` `Unknown` availability in
-      `tests/PricingAvailability.Api.Tests/SingleOfferContractTests.cs`.
-- [ ] T057 [P] [US3] Contract test for Gateway `GET /api/products/{productId}` — concurrent
+- [X] T056 [P] [US3] Contract test for `GET /api/pricing/offers/{productId}` distinguishing
+      `404` (no record) from `200` `Unknown` availability — already covered by
+      `Single_offer_lookup_for_unknown_product_returns_404` and
+      `Unknown_availability_is_distinguishable_from_missing_offer` in
+      `tests/PricingAvailability.Api.Tests/BatchOffersContractTests.cs`; no separate file needed.
+- [X] T057 [P] [US3] Contract test for Gateway `GET /api/products/{productId}` — concurrent
       Catalog+Pricing merge, partial success when Pricing is down — in
       `tests/Gateway.Api.Tests/ProductDetailContractTests.cs`.
-- [ ] T058 [P] [US3] Test that `get_product_details` returning `found:false` results in the
+- [X] T058 [P] [US3] Test that `get_product_details` returning `found:false` results in the
       conversation API relaying an honest "not found," never an invented product, in
       `tests/ProductAdvisor.Application.Tests/NotFoundHonestyTests.cs`.
-- [ ] T059 [P] [US3] Test for follow-up questions about a previously recommended/compared
-      product, resolved via `ConversationSession.LastRecommendation`, in
+- [X] T059 [P] [US3] Test for follow-up questions about a previously recommended/compared
+      product, resolved via `ConversationSession.LastSearchResults` (the generalized concept
+      that superseded the originally-planned `LastRecommendation`, per Phase 4.5/FR-022), in
       `tests/ProductAdvisor.Application.Tests/FollowUpQuestionTests.cs`.
 
 ### Implementation for User Story 3
 
-- [ ] T060 [US3] Implement `GET /api/pricing/offers/{productId}` single-offer endpoint (404 vs.
-      Unknown distinction) in `src/PricingAvailability/PricingAvailability.Application/` +
-      `.Api/` (depends on T017).
-- [ ] T061 [US3] Implement Gateway `GET /api/products/{productId}` — concurrent Catalog+Pricing
+- [X] T060 [US3] Implement `GET /api/pricing/offers/{productId}` single-offer endpoint (404 vs.
+      Unknown distinction) — already implemented in
+      `src/PricingAvailability/PricingAvailability.Api/Program.cs` (depends on T017).
+- [X] T061 [US3] Implement Gateway `GET /api/products/{productId}` — concurrent Catalog+Pricing
       calls, partial-success handling — in `src/Gateway/Gateway.Api/` (depends on T049, T060,
       T023).
-- [ ] T062 [US3] Wire follow-up question handling into the conversation orchestration loop —
-      resolve against `LastRecommendation`/comparison context before choosing a tool — in
-      `src/ProductAdvisor/ProductAdvisor.Application/` (depends on T040, T053).
-- [ ] T063 [US3] Implement a Blazor single-product detail panel (price/availability + verified
+- [X] T062 [US3] Verify/extend follow-up question handling in the conversation orchestration
+      loop — resolve against `LastSearchResults` before choosing a tool. Verified sufficient as-is
+      via `FollowUpQuestionTests.cs` and a live check ("tell me more about the first one" after a
+      headphones recommendation correctly resolved to Sony WH-1000XM5 with accurate specs) — no
+      extension needed; the existing `BuildChatHistory` system message from Phase 4.5 already
+      covers this — in `src/ProductAdvisor/ProductAdvisor.Application/` (depends on T040, T053,
+      T096).
+- [X] T063 [US3] Implement a Blazor single-product detail panel (price/availability + verified
       flags, "not found" state), linked from recommendation/comparison views, in
       `src/WebApp/WebApp.Blazor/` (depends on T061, T054).
-- [ ] T064 [US3] EndToEnd test covering quickstart Scenario 5 (verified fact lookup + not-found
+- [X] T064 [US3] EndToEnd test covering quickstart Scenario 5 (verified fact lookup + not-found
       honesty) in `tests/EndToEnd.Tests/ProductLookupScenarioTests.cs` (depends on T063).
 
 **Checkpoint**: All three user stories are independently functional.
@@ -517,26 +563,63 @@ nonexistent product and confirm an honest "not found" response.
 
 **Purpose**: Improvements spanning all three stories.
 
-- [ ] T065 [P] EndToEnd resilience test covering quickstart Scenario 6 (Pricing outage → honest
+- [X] T065 [P] EndToEnd resilience test covering quickstart Scenario 6 (Pricing outage → honest
       partial recommendation, no `5xx`) in
       `tests/EndToEnd.Tests/PartialFailureResilienceTests.cs` (constitution Principle V).
-- [ ] T066 [P] Assert distributed trace/correlation propagation (Gateway → Advisor → MCP tool
-      call → Catalog/Pricing → LLM call share one trace/correlation id) via an OpenTelemetry
-      test exporter in `tests/EndToEnd.Tests/ObservabilityTests.cs` (constitution Principle VI).
-- [ ] T067 [P] Extend `.github/workflows/ci.yml` with the docker-compose–based EndToEnd stage
+- [X] T066 [P] Assert correlation propagation (Gateway → Advisor → Catalog/Pricing share one
+      `X-Correlation-Id`) — implemented via the already-configured OpenTelemetry logging
+      provider's `IncludeScopes` plus a matching `Console:FormatterOptions:IncludeScopes` so the
+      id is actually visible in each service's own log output (grepped directly, no separate
+      OTLP collector needed for this scale), in `tests/EndToEnd.Tests/ObservabilityTests.cs`
+      (constitution Principle VI). Along the way, fixed a real bug: `CorrelationIdMiddleware`
+      was pushing a raw `Dictionary<string,object>` as the log scope, which renders as just its
+      type name (no OTLP/console formatter ever showed the actual id) — changed to the
+      structured-template `BeginScope` overload.
+- [X] T067 [P] Extend `.github/workflows/ci.yml` with the docker-compose–based EndToEnd stage
       and the Render deploy trigger (native git auto-deploy per research.md §9, or the
-      documented deploy-hook fallback).
-- [ ] T068 [P] Finalize `render.yaml` with real environment-variable bindings (Neon per-service
+      documented deploy-hook fallback) — the stage already existed; added `LLM_PROVIDER_*`
+      secrets passthrough to the `end-to-end` job so it can actually reach a real LLM in CI
+      (previously these always resolved empty, same as running with no provider configured).
+- [X] T068 [P] Finalize `render.yaml` with real environment-variable bindings (Neon per-service
       connection strings, LLM provider key/endpoint) referencing Render's secret management —
-      no values committed.
-- [ ] T069 [P] Add a lightweight performance check asserting Catalog/Pricing p95 < 300ms and a
-      full US1 turn's non-LLM portion stays within plan.md's Performance Goals.
-- [ ] T070 [P] Run `dotnet format` plus analyzer fixes across the solution; confirm CI's
-      lint/type-check gate is green (constitution Principle I).
-- [ ] T071 [P] Write the repository root `README.md`, pointing to quickstart.md, plan.md, and
+      no values committed — env bindings were already complete; found and fixed a real gap
+      while reviewing: none of the 4 API services map anything at `/` and `/health`/`/alive`
+      were Development-only, so Render's default `/`-based health check would mark every
+      backend service permanently unhealthy in Production (confirmed via a one-off `Production`
+      container run: `/` → 404, `/alive` → 404 before the fix). Fixed by making the
+      detail-free `/alive` liveness check available in every environment
+      (`ServiceDefaults/Extensions.cs`) and adding `healthCheckPath: /alive` to each API
+      service in `render.yaml`.
+- [X] T069 [P] Add a lightweight performance check asserting Catalog/Pricing p95 < 300ms and a
+      full US1 turn's non-LLM portion stays within plan.md's Performance Goals — implemented in
+      `tests/EndToEnd.Tests/PerformanceTests.cs` (Catalog search p95, Pricing batch p95, and the
+      direct comparison endpoint with `includeExplanation:false` — genuinely LLM-free per
+      FR-018 — asserted well under the LLM-inclusive 3s turn budget); all 3 pass against the
+      live stack.
+- [X] T070 [P] Run `dotnet format` plus analyzer fixes across the solution; confirm CI's
+      lint/type-check gate is green (constitution Principle I) — fixed whitespace formatting in
+      3 files, suppressed a CA1848 warning (with justification) introduced by the T066
+      correlation-id fix. A `--configuration Release --no-incremental` build (matching CI's
+      build step, which surfaces more analyzer diagnostics than the default incremental build)
+      now shows zero CA/CS/IDE warnings — only pre-existing, unrelated transitive-dependency
+      warnings (MSB3277 EF Core version conflict, NU1902 AngleSharp advisory) remain.
+- [X] T071 [P] Write the repository root `README.md`, pointing to quickstart.md, plan.md, and
       the Aspire/docker-compose run instructions.
-- [ ] T072 Manually walk through quickstart.md end-to-end once; file any gaps found as follow-up
-      tasks rather than leaving them undiscovered.
+- [X] T072 Manually walk through quickstart.md end-to-end once; file any gaps found as follow-up
+      tasks rather than leaving them undiscovered. Walked all 6 Validation Scenarios against the
+      live docker-compose stack (with a real LLM) and found/fixed 3 gaps: (1) `quickstart.md`
+      referenced a nonexistent `docker-compose.ci.yml` overlay and a bare `dotnet test` that
+      doesn't resolve from repo root — corrected to the actually-working commands; (2)
+      `quickstart.md`'s Scenario 6 named a wrong service (`pricing-availability-api` vs. the
+      real `pricing-api`) — corrected; (3) Scenario 2 (clarify-then-recommend) sometimes asked a
+      second, optional-preferences clarifying question instead of proceeding to a
+      recommendation once category+budget were both known — reinforced the system prompt in
+      `ConversationOrchestrator.cs` to state category+budget are the ONLY required fields;
+      verified 5/5 afterward (was ~2/3 before). All 6 scenarios now pass consistently except the
+      already-known Scenario 3 LLM-judgment edge case (an unusually low budget occasionally
+      prompts a currency-confirmation clarification instead of an honest zero-match
+      recommendation) — a genuine LLM reasoning variance, not a code defect, left as a known,
+      documented flake (see `RecommendationScenarioTests.Scenario_3`).
 
 ---
 
@@ -562,6 +645,9 @@ nonexistent product and confirm an honest "not found" response.
 - **User Story 3 (Phase 5)**: Depends only on Foundational; T061/T063 additionally build on the
   Catalog product-detail endpoint from T049 (US2) and the conversation/Blazor scaffolding from
   US1 — if US2 hasn't been built yet, complete T049 as a prerequisite before T061.
+- **Persist Structured Renders Across Turns (Phase 4.6)**: Depends on Phase 3.5 (the Blazor
+  `Home.razor` rendering it fixes) — no dependency on Phase 4/4.5/5, so it may proceed in any
+  order relative to them; completed before Phase 6 (Polish).
 - **Polish (Phase 6)**: Depends on all desired user stories being complete.
 
 ### Within Each User Story

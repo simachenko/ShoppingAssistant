@@ -29,6 +29,107 @@
                 <div>@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(entry.Text))</div>
             }
         </div>
+
+        @* Each turn's own structured rendering stays attached to that turn (FR-023) instead of
+           sharing one "current result" slot, so an earlier comparison table/recommendation list
+           doesn't disappear from view once a later turn's result arrives. *@
+        @if (entry.Turn is { Type: "clarification" } clarificationTurn)
+        {
+            <div class="alert alert-info">@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(clarificationTurn.Question ?? ""))</div>
+        }
+        else if (entry.Turn is { Type: "recommendation" } recommendationTurn)
+        {
+            @if (recommendationTurn.Items is { Count: > 0 })
+            {
+                <div class="recommendation-list">
+                    @foreach (var item in recommendationTurn.Items)
+                    {
+                        <div class="recommendation-card">
+                            <h3><a href="@($"products/{item.ProductId}")">@item.Name</a></h3>
+                            <p>
+                                @if (item.Price is not null)
+                                {
+                                    <span>@item.Price.Amount @item.Price.Currency</span>
+                                    @if (!item.PriceVerified)
+                                    {
+                                        <em> (price could not be verified)</em>
+                                    }
+                                }
+                                else
+                                {
+                                    <em>Price could not be verified</em>
+                                }
+                                —
+                                @if (item.AvailabilityVerified)
+                                {
+                                    <span>@item.Availability</span>
+                                }
+                                else
+                                {
+                                    <em>Availability could not be verified</em>
+                                }
+                            </p>
+                            <p><strong>Why it matches:</strong></p>
+                            <ul>
+                                @foreach (var reason in item.MatchedRequirements)
+                                {
+                                    <li>@reason</li>
+                                }
+                            </ul>
+                            <p><strong>Trade-offs:</strong></p>
+                            <ul>
+                                @foreach (var tradeOff in item.TradeOffs)
+                                {
+                                    <li>@tradeOff</li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-warning">@recommendationTurn.UnmetConstraintExplanation</div>
+            }
+        }
+        else if (entry.Turn is { Type: "comparison", Criteria: not null, Rows: not null } comparisonTurn)
+        {
+            <div class="comparison-table-wrapper">
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            @foreach (var criterion in comparisonTurn.Criteria)
+                            {
+                                <th>@criterion</th>
+                            }
+                            <th>Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in comparisonTurn.Rows)
+                        {
+                            <tr>
+                                <td><a href="@($"products/{row.ProductId}")">@row.Name</a></td>
+                                @foreach (var criterion in comparisonTurn.Criteria)
+                                {
+                                    <td>
+                                        @(row.Values.GetValueOrDefault(criterion) ?? "Not verified")
+                                        @{ var delta = row.DeltasVsBest.GetValueOrDefault(criterion); }
+                                        @if (!string.IsNullOrEmpty(delta))
+                                        {
+                                            <br />
+                                            <small>@delta</small>
+                                        }
+                                    </td>
+                                }
+                                <td>@row.Rating</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
     }
     @if (_isStreamingAssistantTurn)
     {
@@ -39,106 +140,9 @@
     }
 </div>
 
-@if (_lastTurn is { Type: "clarification" })
-{
-    <div class="alert alert-info">@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(_lastTurn.Question ?? ""))</div>
-}
-else if (_errorMessage is not null)
+@if (_errorMessage is not null)
 {
     <div class="alert alert-danger">@_errorMessage</div>
-}
-else if (_lastTurn is { Type: "recommendation" })
-{
-    @if (_lastTurn.Items is { Count: > 0 })
-    {
-        <div class="recommendation-list">
-            @foreach (var item in _lastTurn.Items)
-            {
-                <div class="recommendation-card">
-                    <h3>@item.Name</h3>
-                    <p>
-                        @if (item.Price is not null)
-                        {
-                            <span>@item.Price.Amount @item.Price.Currency</span>
-                            @if (!item.PriceVerified)
-                            {
-                                <em> (price could not be verified)</em>
-                            }
-                        }
-                        else
-                        {
-                            <em>Price could not be verified</em>
-                        }
-                        —
-                        @if (item.AvailabilityVerified)
-                        {
-                            <span>@item.Availability</span>
-                        }
-                        else
-                        {
-                            <em>Availability could not be verified</em>
-                        }
-                    </p>
-                    <p><strong>Why it matches:</strong></p>
-                    <ul>
-                        @foreach (var reason in item.MatchedRequirements)
-                        {
-                            <li>@reason</li>
-                        }
-                    </ul>
-                    <p><strong>Trade-offs:</strong></p>
-                    <ul>
-                        @foreach (var tradeOff in item.TradeOffs)
-                        {
-                            <li>@tradeOff</li>
-                        }
-                    </ul>
-                </div>
-            }
-        </div>
-    }
-    else
-    {
-        <div class="alert alert-warning">@_lastTurn.UnmetConstraintExplanation</div>
-    }
-}
-else if (_lastTurn is { Type: "comparison", Criteria: not null, Rows: not null })
-{
-    <div class="comparison-table-wrapper">
-        <table class="comparison-table">
-            <thead>
-                <tr>
-                    <th>Product</th>
-                    @foreach (var criterion in _lastTurn.Criteria)
-                    {
-                        <th>@criterion</th>
-                    }
-                    <th>Rating</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in _lastTurn.Rows)
-                {
-                    <tr>
-                        <td>@row.Name</td>
-                        @foreach (var criterion in _lastTurn.Criteria)
-                        {
-                            <td>
-                                @(row.Values.GetValueOrDefault(criterion) ?? "Not verified")
-                                @{ var delta = row.DeltasVsBest.GetValueOrDefault(criterion); }
-                                @if (!string.IsNullOrEmpty(delta))
-                                {
-                                    <br />
-                                    <small>@delta</small>
-                                }
-                            </td>
-                        }
-                        <td>@row.Rating</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
 }
 
 <div class="chat-input">
@@ -150,13 +154,14 @@ else if (_lastTurn is { Type: "comparison", Criteria: not null, Rows: not null }
 </div>
 
 @code {
-    private readonly List<(string Role, string Text)> _history = [];
+    private sealed record HistoryEntry(string Role, string Text, ChatTurnDto? Turn);
+
+    private readonly List<HistoryEntry> _history = [];
     private string _draftMessage = "";
     private bool _isSending;
     private bool _isStreamingAssistantTurn;
     private string _streamingNarration = "";
     private Guid? _sessionId;
-    private ChatTurnDto? _lastTurn;
     private string? _errorMessage;
 
     private async Task OnKeyDownAsync(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
@@ -178,7 +183,7 @@ else if (_lastTurn is { Type: "comparison", Criteria: not null, Rows: not null }
         _draftMessage = "";
         _isSending = true;
         _errorMessage = null;
-        _history.Add(("user", message));
+        _history.Add(new HistoryEntry("user", message, null));
 
         try
         {
@@ -237,7 +242,6 @@ else if (_lastTurn is { Type: "comparison", Criteria: not null, Rows: not null }
     private void ApplyTurnResult(ChatTurnDto turn)
     {
         _sessionId = turn.SessionId;
-        _lastTurn = turn;
 
         var narration = turn.Type switch
         {
@@ -245,6 +249,6 @@ else if (_lastTurn is { Type: "comparison", Criteria: not null, Rows: not null }
             "recommendation" or "comparison" => turn.Message ?? "",
             _ => "",
         };
-        _history.Add(("assistant", narration));
+        _history.Add(new HistoryEntry("assistant", narration, turn));
     }
 }

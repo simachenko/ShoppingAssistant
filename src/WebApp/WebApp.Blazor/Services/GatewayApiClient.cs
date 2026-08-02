@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.ServerSentEvents;
@@ -92,5 +93,21 @@ public sealed class GatewayApiClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<ComparisonResultDto>(cancellationToken);
         return result ?? throw new InvalidOperationException("Gateway returned an empty comparison response.");
+    }
+
+    /// <summary>
+    /// Plain product-detail lookup (US3, contracts/gateway-bff-api.md) — null means Catalog has
+    /// no such product, rendered as an honest "not found" rather than a crash (FR-004/FR-005).
+    /// </summary>
+    public async Task<ProductCandidateDto?> GetProductDetailAsync(Guid productId, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.GetAsync($"/api/products/{productId}", cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ProductCandidateDto>(cancellationToken);
     }
 }
