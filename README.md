@@ -98,8 +98,12 @@ option is [Grafana Cloud](https://grafana.com/products/cloud/):
 2. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to the shown endpoint URL, and
    `OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic <base64(instanceId:apiKey)>` (Grafana
    Cloud shows the exact value to copy).
-3. Apply both to every service — `render.yaml` declares them (`sync: false`) for all five;
-   for Docker Compose, export them before `docker compose up`.
+3. Set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` — the .NET SDK defaults to gRPC, but Grafana
+   Cloud's gateway (and most managed OTLP endpoints) only accept HTTP/protobuf; without this,
+   export fails silently with nothing in the app logs (`docker-compose.yml` already defaults
+   this for local runs; `render.yaml` sets it as a plain, non-secret value for all five).
+4. Apply the endpoint/headers to every service — `render.yaml` declares them (`sync: false`)
+   for all five; for Docker Compose, set them in `.env` before `docker compose up`.
 
 An unreachable/misconfigured OTLP backend never blocks a request — export failures are
 swallowed by the OpenTelemetry SDK's own batching/retry behavior, not surfaced to callers

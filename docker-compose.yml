@@ -5,6 +5,9 @@
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
   OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
+  # The .NET SDK defaults to gRPC; Grafana Cloud's OTLP gateway (and most managed OTLP
+  # endpoints) speak HTTP/protobuf instead — without this, export fails silently.
+  OTEL_EXPORTER_OTLP_PROTOCOL: "${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}"
 
 services:
   postgres:

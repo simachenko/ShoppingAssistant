@@ -22,6 +22,10 @@ services:
         sync: false
       - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
+      # The .NET SDK defaults to gRPC; Grafana Cloud's OTLP gateway (and most managed OTLP
+      # endpoints) speak HTTP/protobuf instead — without this, export fails silently.
+      - key: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
 
   - type: web
     name: pricing-api
@@ -41,6 +45,10 @@ services:
         sync: false
       - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
+      # The .NET SDK defaults to gRPC; Grafana Cloud's OTLP gateway (and most managed OTLP
+      # endpoints) speak HTTP/protobuf instead — without this, export fails silently.
+      - key: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
 
   - type: web
     name: advisor-api
@@ -76,6 +84,10 @@ services:
         sync: false
       - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
+      # The .NET SDK defaults to gRPC; Grafana Cloud's OTLP gateway (and most managed OTLP
+      # endpoints) speak HTTP/protobuf instead — without this, export fails silently.
+      - key: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
 
   - type: web
     name: gateway-api
@@ -110,6 +122,10 @@ services:
         sync: false
       - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
+      # The .NET SDK defaults to gRPC; Grafana Cloud's OTLP gateway (and most managed OTLP
+      # endpoints) speak HTTP/protobuf instead — without this, export fails silently.
+      - key: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
 
   - type: web
     name: webapp
@@ -133,3 +149,7 @@ services:
         sync: false
       - key: OTEL_EXPORTER_OTLP_HEADERS
         sync: false
+      # The .NET SDK defaults to gRPC; Grafana Cloud's OTLP gateway (and most managed OTLP
+      # endpoints) speak HTTP/protobuf instead — without this, export fails silently.
+      - key: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
