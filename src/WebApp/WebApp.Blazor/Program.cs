@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Polly;
 using WebApp.Blazor.Components;
 using WebApp.Blazor.Services;
@@ -51,6 +52,21 @@ builder.Services.AddHttpClient<GatewayApiClient>(client => client.BaseAddress = 
 #pragma warning restore EXTEXP0001
 
 var app = builder.Build();
+
+// Render (and most PaaS reverse proxies) terminates TLS at the edge and forwards plain HTTP
+// internally — without this, the app thinks every request is http, so the Google OAuth
+// redirect_uri it builds is http://... instead of https://..., which doesn't exactly match the
+// URI registered in Google Cloud Console and fails with "redirect_uri_mismatch". Must run before
+// any middleware that reads Request.Scheme (HTTPS redirection, the OAuth challenge, etc).
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+};
+// The proxy's IP isn't fixed/known in advance on a PaaS like Render, so the default
+// known-proxy allowlist (which normally guards against header spoofing) must be cleared.
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseCorrelationId();
 app.MapDefaultEndpoints();
