@@ -28,7 +28,7 @@ public class TurnProcessingCycleTests
         var recommendationService = new FakeRecommendationService(recommendation);
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var result = await orchestrator.ProcessMessageAsync(
@@ -48,9 +48,9 @@ public class TurnProcessingCycleTests
         var chatClient = new FakeChatClient(ExtractionJson.LowConfidence());
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var result = await orchestrator.ProcessMessageAsync(session, "something vague", CancellationToken.None);
@@ -67,14 +67,14 @@ public class TurnProcessingCycleTests
         var chatClient1 = new FakeChatClient(ExtractionJson.Recommend("smartphones", 15000m, "UAH"), "narration");
         var orchestrator1 = new ConversationOrchestrator(
             chatClient1, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient1),
-            new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            new ExtractionStage(chatClient1, TestTurnMetrics.Instance),
+            new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var chatClient2 = new FakeChatClient(ExtractionJson.Recommend("smartphones", 15000m, "UAH"), "narration");
         var orchestrator2 = new ConversationOrchestrator(
             chatClient2, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient2),
-            new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            new ExtractionStage(chatClient2, TestTurnMetrics.Instance),
+            new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result1 = await orchestrator1.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "user-a"), "I need a smartphone under 15000 UAH", CancellationToken.None);

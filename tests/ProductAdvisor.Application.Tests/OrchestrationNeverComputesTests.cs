@@ -47,7 +47,7 @@ public class OrchestrationNeverComputesTests
         var recommendationService = new FakeRecommendationService(expectedRecommendation);
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(session, "I need a smartphone under 15000 UAH", CancellationToken.None);
 
@@ -70,7 +70,7 @@ public class OrchestrationNeverComputesTests
         var recommendationService = new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] });
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(session, "I need a good laptop", CancellationToken.None);
 
@@ -91,7 +91,7 @@ public class OrchestrationNeverComputesTests
         var recommendationService = new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] });
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance), recommendationService, TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(session, "hello", CancellationToken.None);
 

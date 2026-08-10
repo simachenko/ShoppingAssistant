@@ -16,7 +16,7 @@ public class ExtractionStageTests
     public async Task A_schema_valid_result_passes_through_on_the_first_attempt()
     {
         var chatClient = new FakeChatClient(ExtractionJson.Recommend("smartphones", 15000m, "UAH"));
-        var stage = new ExtractionStage(chatClient);
+        var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
         var result = await stage.ExtractAsync(
             UserRequirement.Empty, "I need a smartphone under 15000 UAH", CancellationToken.None);
@@ -31,7 +31,7 @@ public class ExtractionStageTests
     public async Task A_malformed_first_response_triggers_exactly_one_repair_attempt_then_succeeds()
     {
         var chatClient = new FakeChatClient(ExtractionJson.Malformed, ExtractionJson.Recommend("laptops", 30000m, "UAH"));
-        var stage = new ExtractionStage(chatClient);
+        var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
         var result = await stage.ExtractAsync(UserRequirement.Empty, "a laptop under 30000", CancellationToken.None);
 
@@ -44,7 +44,7 @@ public class ExtractionStageTests
     public async Task Two_consecutive_malformed_responses_produce_null_never_a_third_attempt()
     {
         var chatClient = new FakeChatClient(ExtractionJson.Malformed, ExtractionJson.Malformed);
-        var stage = new ExtractionStage(chatClient);
+        var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
         var result = await stage.ExtractAsync(UserRequirement.Empty, "gibberish", CancellationToken.None);
 
@@ -56,7 +56,7 @@ public class ExtractionStageTests
     public async Task An_intent_value_outside_the_closed_set_is_treated_as_a_schema_failure()
     {
         var chatClient = new FakeChatClient(ExtractionJson.UnrecognizedIntent(), ExtractionJson.UnrecognizedIntent());
-        var stage = new ExtractionStage(chatClient);
+        var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
         var result = await stage.ExtractAsync(UserRequirement.Empty, "do something else entirely", CancellationToken.None);
 
@@ -68,7 +68,7 @@ public class ExtractionStageTests
     public async Task Product_references_and_missing_fields_are_captured()
     {
         var chatClient = new FakeChatClient(ExtractionJson.Compare(["Galaxy S24", "Pixel 9"]));
-        var stage = new ExtractionStage(chatClient);
+        var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
         var result = await stage.ExtractAsync(UserRequirement.Empty, "compare Galaxy S24 and Pixel 9", CancellationToken.None);
 

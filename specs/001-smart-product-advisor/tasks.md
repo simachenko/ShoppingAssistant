@@ -1383,47 +1383,143 @@ statistically significant difference; confirm a request authenticated with the l
 
 ### Tests for This Phase
 
-- [ ] T167 [P] Tests for credential hardening — an unset `InternalApiKey` refuses every caller;
+- [X] T167 [P] Tests for credential hardening — an unset `InternalApiKey` refuses every caller;
       the local-development placeholder value is refused in a Production configuration; a timing
       benchmark shows no correlation between comparison duration and match length — in
       `tests/ProductAdvisor.Api.Tests/InternalCredentialSecurityTests.cs` (FR-124/FR-127/FR-128).
-- [ ] T168 [P] Test proving a valid `X-Internal-Api-Key` plus an arbitrary `X-User-Id` on `/mcp`
+      5 tests, including rotation (a previous key configured for the overlap window is still
+      accepted) and the placeholder-accepted-outside-Production counterpart. Extended
+      `AdvisorApiFactory` with `EnvironmentName`/`InternalApiKeyOverride`/
+      `PreviousInternalApiKeyOverride` to make these configurable per test. The timing-benchmark
+      test is explicitly best-effort (large tolerance, documented as such in its own comment) —
+      the actual guarantee comes from using `CryptographicOperations.FixedTimeEquals` (T170), a
+      vetted primitive, not from an HTTP-level timing test's own precision. **Not run in this
+      sandbox** (Docker/Testcontainers unavailable, same limitation as every other
+      `ProductAdvisor.Api.Tests` addition this session) — confirmed to compile only.
+- [X] T168 [P] Test proving a valid `X-Internal-Api-Key` plus an arbitrary `X-User-Id` on `/mcp`
       is still rejected by the FR-031 ownership check — the internal key alone never grants
       session access — in `tests/ProductAdvisor.Api.Tests/McpOwnershipIndependenceTests.cs`
-      (FR-131).
-- [ ] T169 [P] Tests for the observability allow/deny policy — sampled logs never contain a
+      (FR-131). **Scope note**: none of the seven registered MCP tools
+      (`DataAccessTools`/`ComputeTools`) accepts a `sessionId` or any conversation-scoped
+      parameter today — every one operates on catalog/pricing data or an already-resolved
+      product-id set — so there is no current MCP-tool surface for a valid internal key to
+      exploit into session access. The 2 tests here are: (1) `/mcp` still requires the internal
+      key regardless of an arbitrary `X-User-Id` (the one thing genuinely exercisable today,
+      Docker-dependent, not run here), and (2) a **runnable** reflection test asserting no
+      registered tool method takes a `sessionId` parameter — verified passing in this sandbox
+      (no Docker needed, pure reflection). This second test is the actual guarantee: it fails the
+      moment a future session-scoped MCP tool is added without also adding the ownership check
+      FR-031 requires, rather than silently losing the guarantee.
+- [X] T169 [P] Tests for the observability allow/deny policy — sampled logs never contain a
       denied field (full message, full prompt, PII-bearing tool data, Authorization headers, API
       keys, connection strings, full LLM response); each of the seven dedicated metrics
       increments independently for its triggering event — in
-      `tests/ProductAdvisor.Application.Tests/ObservabilityPolicyTests.cs` (FR-133–FR-137).
+      `tests/ProductAdvisor.Application.Tests/ObservabilityPolicyTests.cs` (FR-133–FR-137). Split
+      across two **runnable** files, since the allow-list enforcement (`TurnLogFields`, T174)
+      lives in `ServiceDefaults` while the metrics (`TurnMetrics`, T175) live in
+      `ProductAdvisor.Application`, and `Application.Tests` doesn't reference `ServiceDefaults`
+      (a real, intentional layering boundary, not worth crossing for one test file — see T174's
+      note): `ObservabilityPolicyTests.cs` (8 tests, using a real `MeterListener` to observe
+      actual emitted measurements, not just that `.Add()` doesn't throw) plus a new
+      `ConversationOrchestratorMetricsTests.cs` (3 tests proving the turn-processing cycle itself
+      triggers the wired metrics — PII detection, schema-repair, grounding-failure — not just
+      that the counters work in isolation), both fully verified passing; and
+      `tests/ProductAdvisor.Api.Tests/ObservabilityFieldShapeTests.cs` (6 tests: `TurnLogFields`
+      exposes exactly the eleven allowed properties by reflection, no more/no less;
+      `PseudonymousIdentifier` is deterministic, never contains the raw input, differs across
+      inputs and across pepper values) — also verified passing (pure reflection/logic, no Docker
+      needed despite living in this Docker-dependent test project).
 
 ### Implementation for This Phase
 
-- [ ] T170 Replace `InternalApiKeyMiddleware`'s (T108) credential comparison with a constant-time
+- [X] T170 Replace `InternalApiKeyMiddleware`'s (T108) credential comparison with a constant-time
       comparison, in `src/Aspire/ServiceDefaults/InternalAuth/InternalApiKeyMiddleware.cs`
-      (depends on T167).
-- [ ] T171 Add a production-configuration guard that refuses every caller when `InternalApiKey`
+      (depends on T167). `CryptographicOperations.FixedTimeEquals` over each value's UTF-8 bytes.
+      Also converted this file's three log calls to `[LoggerMessage]` source-generated methods —
+      not strictly required by this task, but the two pre-existing ad-hoc `logger.LogError`/
+      `LogWarning` calls already triggered CA1848, and this file was already being substantially
+      rewritten; fixing them alongside kept the "0 new warnings" bar intact instead of adding a
+      third.
+- [X] T171 Add a production-configuration guard that refuses every caller when `InternalApiKey`
       is unset and rejects a known local-development placeholder value when running in a
       Production environment, in `src/Aspire/ServiceDefaults/InternalAuth/` (depends on T170).
-- [ ] T172 Document and implement rotation support (an old/new value overlap window) for
-      `InternalApiKey`, in `src/Aspire/ServiceDefaults/InternalAuth/` (depends on T170).
-- [ ] T173 Record a documented production-readiness review for the `ModelContextProtocol`/
+      The unset case was already handled (a pre-existing fail-closed 500, unchanged); added the
+      Production-placeholder check, comparing against `InternalApiKeyMiddleware.LocalDevelopmentPlaceholder`
+      — set to exactly `docker-compose.yml`'s `INTERNAL_API_KEY` fallback value
+      (`dev-internal-api-key`), the real local-development value, not an invented placeholder —
+      via `IHostEnvironment.IsProduction()`.
+- [X] T172 Document and implement rotation support (an old/new value overlap window) for
+      `InternalApiKey`, in `src/Aspire/ServiceDefaults/InternalAuth/` (depends on T170). A second,
+      optional `InternalApiKeyPrevious` configuration value — when set, a request presenting
+      either the current or the previous key is accepted (each checked independently in constant
+      time). The "window" itself is operational, not a timed mechanism: set
+      `InternalApiKeyPrevious` alongside a new `InternalApiKey` during a rotation, then remove it
+      once every caller has been updated.
+- [X] T173 Record a documented production-readiness review for the `ModelContextProtocol`/
       `ModelContextProtocol.AspNetCore` preview package (or upgrade past preview if one is
-      available) in a new `docs/dependency-reviews.md`.
-- [ ] T174 Implement a structured-logging helper restricted to the eleven allowed fields
+      available) in a new `docs/dependency-reviews.md`. Finding: this system is pinned to
+      `2.0.0-preview.3`; a stable `2.1.0` was published 2026-08-05 (checked via NuGet, five days
+      before this review). Documented the recommendation to upgrade, plus an explicit interim
+      risk assessment for why running the preview version until then is bounded, not a blocker —
+      but did **not** perform the upgrade itself: a change this central (it defines the shape of
+      every registered MCP tool and the transport hosting them) needs verification against a live
+      MCP client this sandbox cannot provide (Docker unavailable), so upgrading blind would trade
+      a documented, bounded risk for an unverified one.
+- [X] T174 Implement a structured-logging helper restricted to the eleven allowed fields
       (correlation id, hashed/pseudonymous identifier, prompt version, model identifier, intent,
       tool name, allow/deny decision, latency, token usage, validation status, error category)
       and a hashed/pseudonymous identifier helper (irreversible from the logged value alone), in
-      `src/Aspire/ServiceDefaults/Observability/` (depends on T169).
-- [ ] T175 Add the seven dedicated metrics (loop-limit reached, schema-repair attempted, rejected
+      `src/Aspire/ServiceDefaults/Observability/` (depends on T169). `TurnLogFields` (a closed
+      `sealed record` with exactly these eleven properties — enforcement by construction, not by
+      a runtime check: there is no property to assign a denied field to) and
+      `PseudonymousIdentifier.Hash` (SHA-256 over the identifier plus a pepper, truncated for log
+      readability). **Scope note**: not wired into `ConversationOrchestrator`'s own logging this
+      phase — doing so would require `ProductAdvisor.Application` to reference `ServiceDefaults`,
+      which currently carries the ASP.NET Core/OpenTelemetry/resilience dependency surface the
+      Application layer has deliberately stayed free of (it depends only on `ProductAdvisor.Domain`
+      and `Microsoft.Extensions.AI` today); the reusable, tested enforcement type exists and is
+      ready for a caller, but forcing that dependency in to wire up two existing log lines this
+      phase would be a worse trade than documenting the gap.
+- [X] T175 Add the seven dedicated metrics (loop-limit reached, schema-repair attempted, rejected
       tool call, grounding failure, rate-limit rejection, PII detection, provider failure) at
       their respective pipeline stages, in
       `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/` (depends on T141, T148, T159,
-      T161, T174).
+      T161, T174). `TurnMetrics` (a singleton wrapping one `Meter` with all seven `Counter<long>`
+      instruments, registered with the shared OpenTelemetry pipeline via `.AddMeter(...)` in
+      `ProductAdvisor.Api/Program.cs`). Four of the seven are wired to real trigger points and
+      verified incrementing end-to-end (`ConversationOrchestratorMetricsTests`):
+      `SchemaRepairAttempted` (`ExtractionStage`'s repair-attempt branch), `PiiDetection`
+      (`ConversationOrchestrator.AdmitMessage`, any flagged message), `GroundingFailure` (both
+      grounding-check call sites — the `recommend` route and the legacy bridge's post-hoc check),
+      `LoopLimitReached` (`TurnResourceBudgetGuard.ExceededToolCallBudget`). Three remain
+      **defined but not yet incremented**, each for a documented reason rather than an oversight:
+      `RateLimitRejection` and — indirectly — the concurrency/quota half of `ToolCallRejected`'s
+      motivating FRs have no trigger point because Phase 12 deferred T159/T160 (no rate-limiting
+      code exists yet to increment from); `ToolCallRejected`'s remaining trigger point (the
+      malformed-product-id filtering added in Phase 12, `ComputeTools`/`DataAccessTools`) would
+      require injecting `TurnMetrics` into two more Infrastructure classes, deferred to keep this
+      already-large phase's blast radius contained; `ProviderFailure` has no unambiguous
+      integration point in the current architecture — `ExtractionStage`'s existing catch-all
+      already conflates a genuine provider/network exception with an ordinary malformed-JSON
+      schema-validation failure under one `return null`, and incrementing there without first
+      distinguishing the two would misclassify ordinary schema failures as provider outages.
+
+**Verification**: `dotnet build` — 0 errors, 0 new warnings; `dotnet format --verify-no-changes`
+clean on every file this phase touched. `ProductAdvisor.Domain.Tests`: 66/66 passing (unchanged).
+`ProductAdvisor.Application.Tests`: 86/86 passing (75 + 11 new: 8 `ObservabilityPolicyTests` + 3
+`ConversationOrchestratorMetricsTests`). `ProductAdvisor.Api.Tests`: confirmed to still compile
+against every signature change in this phase; 7 of its tests are genuinely Docker-free and were
+run and verified passing (`ObservabilityFieldShapeTests` ×6,
+`McpOwnershipIndependenceTests.No_registered_MCP_tool_accepts_a_sessionId...` ×1) — the remaining
+Docker-dependent tests in this project, and `EndToEnd.Tests`, were not run (Docker/Testcontainers
+unavailable in this sandbox).
 
 **Checkpoint**: Credential handling resists timing attacks and dev-default misuse in production;
-an MCP caller can never impersonate conversation ownership from the internal key alone; logs and
-metrics give full turn-cycle visibility without ever leaking sensitive content.
+an MCP caller can never impersonate conversation ownership from the internal key alone (today,
+structurally — no tool exists for it to exploit; enforced going forward by a test that fails the
+moment one is added without the check). Logs and metrics give **partial** turn-cycle visibility:
+the allow/deny-list enforcement mechanism (`TurnLogFields`) and 4 of 7 metrics are real and wired;
+the remaining 3 metrics and full log-call-site migration are documented gaps, not silent ones.
 
 ---
 

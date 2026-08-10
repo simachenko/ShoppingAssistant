@@ -15,9 +15,9 @@ public class ConversationOrchestratorGuardrailTests
     private static ConversationOrchestrator BuildOrchestrator(FakeChatClient chatClient, RequestGuardrailOptions guardrailOptions) =>
         new(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, guardrailOptions, TestLogger.Instance);
+            TestBudgetGuard.Generous, guardrailOptions, TestTurnMetrics.Instance, TestLogger.Instance);
 
     [Fact]
     public async Task An_oversized_message_never_reaches_extraction()

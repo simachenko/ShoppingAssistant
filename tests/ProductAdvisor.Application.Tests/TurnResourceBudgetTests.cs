@@ -111,7 +111,7 @@ public class TurnResourceBudgetTests
     private static ConversationOrchestrator BuildOrchestrator(IChatClient chatClient, TurnResourceBudgetOptions options) =>
         new(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            new TurnResourceBudgetGuard(options), new RequestGuardrailOptions(), TestLogger.Instance);
+            new TurnResourceBudgetGuard(options), new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 }

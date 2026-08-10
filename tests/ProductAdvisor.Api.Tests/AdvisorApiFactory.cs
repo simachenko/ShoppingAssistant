@@ -24,15 +24,37 @@ public sealed class AdvisorApiFactory(string? connectionString = null) : WebAppl
     public Func<HttpRequestMessage, (HttpStatusCode, object?)> PricingResponder { get; set; } = _ => (HttpStatusCode.NotFound, null);
     public IChatClient? ChatClientOverride { get; set; }
 
+    /// <summary>Overrides the hosted app's <c>IHostEnvironment.EnvironmentName</c> — defaults to
+    /// <c>WebApplicationFactory</c>'s own "Development", overridden only by tests proving
+    /// Production-specific behavior (e.g. <c>InternalApiKeyMiddleware</c>'s rejection of the
+    /// local-development placeholder value, FR-127).</summary>
+    public string? EnvironmentName { get; set; }
+
+    /// <summary>Overrides the <c>InternalApiKey</c> configuration value the hosted app expects —
+    /// defaults to <see cref="InternalApiKeyTestDefaults.Key"/>; a credential-hardening test sets
+    /// this directly to exercise a specific value (e.g. the local-development placeholder, or
+    /// null to prove the unset case) rather than only ever varying what the *client* sends.</summary>
+    public string? InternalApiKeyOverride { get; set; } = InternalApiKeyTestDefaults.Key;
+
+    /// <summary>Sets <c>InternalApiKeyPrevious</c> — a rotation test's "still-valid old value"
+    /// (FR-128). Unset (null) by default, matching production's default no-rotation-in-progress state.</summary>
+    public string? PreviousInternalApiKeyOverride { get; set; }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        if (EnvironmentName is not null)
+        {
+            builder.UseEnvironment(EnvironmentName);
+        }
+
         builder.ConfigureAppConfiguration((_, config) =>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:advisordb"] = connectionString
                     ?? "Host=localhost;Database=advisordb_test;Username=test;Password=test",
-                ["InternalApiKey"] = InternalApiKeyTestDefaults.Key,
+                ["InternalApiKey"] = InternalApiKeyOverride,
+                ["InternalApiKeyPrevious"] = PreviousInternalApiKeyOverride,
             });
         });
 

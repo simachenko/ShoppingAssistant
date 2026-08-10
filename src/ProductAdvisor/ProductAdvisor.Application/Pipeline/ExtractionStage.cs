@@ -11,7 +11,7 @@ namespace ProductAdvisor.Application.Pipeline;
 /// final outcome. Uses schema-first structured output (FR-094); exactly one repair attempt is
 /// made when the first result fails schema validation (FR-051), never a third attempt.
 /// </summary>
-public sealed class ExtractionStage(IChatClient chatClient)
+public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
 {
     /// <summary>
     /// Distinct from source-control history (FR-101) — bump this when the prompt's *content*
@@ -58,6 +58,7 @@ public sealed class ExtractionStage(IChatClient chatClient)
         }
 
         // Exactly one repair attempt, informed by the failure (FR-051) — never a third attempt.
+        metrics.SchemaRepairAttempted.Add(1);
         messages.Add(new ChatMessage(ChatRole.User,
             "Your previous reply did not match the required schema. Reply again with exactly " +
             "one JSON object matching the schema — no other text."));

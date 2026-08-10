@@ -26,6 +26,7 @@ public sealed partial class ConversationOrchestrator(
     IRecommendationService recommendationService,
     TurnResourceBudgetGuard budgetGuard,
     RequestGuardrailOptions guardrailOptions,
+    TurnMetrics metrics,
     ILogger<ConversationOrchestrator> logger)
 {
     private const string LegacyToolSystemPrompt = """
@@ -102,6 +103,8 @@ public sealed partial class ConversationOrchestrator(
         {
             return normalized;
         }
+
+        metrics.PiiDetection.Add(1);
 
         if (piiResult.Action == "Blocked")
         {
@@ -326,7 +329,14 @@ public sealed partial class ConversationOrchestrator(
         var response = await chatClient.GetResponseAsync(
             NarrationPrompt.BuildMessages(requirement, envelope), cancellationToken: cancellationToken);
         LogNarrationProduced(NarrationPrompt.PromptVersion);
-        return OutputValidationStage.Validate(response.Text, envelope);
+
+        var validated = OutputValidationStage.Validate(response.Text, envelope);
+        if (!string.Equals(validated, response.Text, StringComparison.Ordinal))
+        {
+            metrics.GroundingFailure.Add(1);
+        }
+
+        return validated;
     }
 
     private async Task<AdvisorTurnResult> RunLegacyToolContinuationAsync(
@@ -352,6 +362,7 @@ public sealed partial class ConversationOrchestrator(
 
         if (TurnResourceBudgetGuard.ExceededToolCallBudget(response))
         {
+            metrics.LoopLimitReached.Add(1);
             throw new TurnBudgetExceededException(
                 "This request needed more steps than allowed and could not be completed.", degraded: true);
         }
@@ -373,7 +384,7 @@ public sealed partial class ConversationOrchestrator(
     /// legitimate fact these routes state, which would be a regression, not a safety
     /// improvement.
     /// </summary>
-    private static AdvisorTurnResult ApplyGroundingIfApplicable(AdvisorTurnResult result)
+    private AdvisorTurnResult ApplyGroundingIfApplicable(AdvisorTurnResult result)
     {
         var envelope = (result.Type, result.Comparison, result.CheckoutLink) switch
         {
@@ -388,7 +399,13 @@ public sealed partial class ConversationOrchestrator(
         }
 
         var validated = OutputValidationStage.Validate(result.Message, envelope);
-        return string.Equals(validated, result.Message, StringComparison.Ordinal) ? result : result with { Message = validated };
+        if (string.Equals(validated, result.Message, StringComparison.Ordinal))
+        {
+            return result;
+        }
+
+        metrics.GroundingFailure.Add(1);
+        return result with { Message = validated };
     }
 
     /// <summary>

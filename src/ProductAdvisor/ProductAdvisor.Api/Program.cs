@@ -25,6 +25,11 @@ builder.AddNpgsqlDbContext<AdvisorDbContext>("advisordb");
 builder.AddAdvisorChatClient();
 builder.AddAdvisorHttpClients();
 
+builder.Services.AddSingleton<TurnMetrics>();
+// FR-136: exposes the seven turn-cycle metrics through the same OpenTelemetry pipeline every
+// other metric in this service already uses (ConfigureOpenTelemetry, research.md §16) — additive
+// to that shared configuration, not a second, separate metrics pipeline.
+builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics.AddMeter(TurnMetrics.MeterName));
 builder.Services.AddScoped<IToolResultCapture, ToolResultCapture>();
 builder.Services.AddScoped<ProductComparisonService>();
 builder.Services.AddScoped<DataAccessTools>();

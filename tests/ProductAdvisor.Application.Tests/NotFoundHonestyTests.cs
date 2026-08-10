@@ -28,9 +28,9 @@ public class NotFoundHonestyTests
             "I couldn't find that product in our catalog.");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), capture,
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             session, "Is the Nokia 3310 Pro in stock?", CancellationToken.None);
@@ -50,9 +50,9 @@ public class NotFoundHonestyTests
             "That product doesn't exist in our catalog.");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(session, "Tell me about the XYZ9000", CancellationToken.None);
 
@@ -69,9 +69,9 @@ public class NotFoundHonestyTests
             "Which two products would you like to compare?");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(session, "compare the first one and the second one", CancellationToken.None);
 

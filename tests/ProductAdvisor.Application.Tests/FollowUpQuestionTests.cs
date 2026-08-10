@@ -34,9 +34,9 @@ public class FollowUpQuestionTests
             "Sure, here's more about the Galaxy S24.");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(session, "Tell me more about the first one", CancellationToken.None);
 
@@ -58,9 +58,9 @@ public class FollowUpQuestionTests
             "What are you looking for?");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient),
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(session, "the first one, please", CancellationToken.None);
 
