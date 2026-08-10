@@ -40,10 +40,15 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
         }
         else if (!string.IsNullOrWhiteSpace(category))
         {
-            // Case-insensitive: the LLM may pass "smartphones" for "Smartphones" — same
-            // tolerance already applied to the free-text query below.
+            // Case-insensitive AND substring-tolerant: the LLM may pass a singular/differently-
+            // inflected form ("smartphone") for a plural catalog name ("Smartphones"), so this
+            // must not require an exact match — the same "%pattern%" tolerance the free-text
+            // query below already uses. A trailing "%" alone would only forgive the plural case;
+            // wrapping both sides also forgives minor mismatches like "smart phone" vs
+            // "Smartphones" (already-established tolerance level for this catalog's search).
+            var categoryPattern = $"%{category}%";
             var matchingCategoryIds = await dbContext.Categories
-                .Where(c => EF.Functions.ILike(c.Name, category))
+                .Where(c => EF.Functions.ILike(c.Name, categoryPattern))
                 .Select(c => c.CategoryId)
                 .ToListAsync(cancellationToken);
 
@@ -108,5 +113,8 @@ public sealed class ProductRepository(CatalogDbContext dbContext) : IProductRepo
     }
 
     public Task<Category?> FindCategoryByNameAsync(string name, CancellationToken cancellationToken) =>
-        dbContext.Categories.FirstOrDefaultAsync(c => EF.Functions.ILike(c.Name, name), cancellationToken);
+        // Same substring tolerance as BuildFilteredQueryAsync's category filter above — this
+        // backs the get_category resolution tool, which has the identical singular/plural
+        // mismatch exposure (e.g. "smartphone" vs. the catalog's "Smartphones").
+        dbContext.Categories.FirstOrDefaultAsync(c => EF.Functions.ILike(c.Name, $"%{name}%"), cancellationToken);
 }

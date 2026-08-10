@@ -1,168 +1,203 @@
 # Smart Retail Product Advisor
 
-An MCP-based conversational advisor that helps shoppers find, compare, and check facts about
-products — built as a set of independent, DDD-modeled microservices behind a single Gateway/BFF
-and a Blazor UI. Product facts, prices, and comparisons are always computed deterministically;
-the language model only understands requests, chooses tools, and narrates already-computed
-results — it never invents a price, spec, or ranking.
+MCP-агент для пошуку, рекомендації та порівняння товарів. Система розуміє запити природною
+мовою, зберігає вимоги користувача між ходами діалогу та отримує продуктові факти через
+контрольовані MCP tools.
 
-## Services
+LLM використовується для визначення наміру й формування тексту відповіді. Ціни,
+характеристики, availability, scores, ratings і checkout URL обчислюються або отримуються
+детерміновано — модель не створює їх самостійно.
 
-| Service | Responsibility |
+## Матеріали проєкту
+
+- [Розгорнута система на Render](https://webapp-jcx5.onrender.com)
+- [Miro: архітектура, call loop, пам'ять, контекст і презентація](https://miro.com/app/board/uXjVHz8Zh3A=/)
+- [Prompt Book](prompt-book.md)
+- [Специфікація](specs/001-smart-product-advisor/spec.md)
+- [Архітектурний план](specs/001-smart-product-advisor/plan.md)
+- [Модель даних](specs/001-smart-product-advisor/data-model.md)
+- [API та MCP-контракти](specs/001-smart-product-advisor/contracts/)
+
+## Компоненти
+
+| Компонент | Призначення |
 |---|---|
-| `ProductCatalog` | Products, categories, brands, specifications, deterministic parametric search |
-| `PricingAvailability` | Current prices, discounts, stock status |
-| `ProductAdvisor` | MCP server, conversation orchestration, recommendation/comparison computation |
-| `Gateway` | Single BFF entry point for the UI — composes the above, no direct client access to them |
-| `WebApp` (Blazor) | Chat UI, explicit product-picker/comparison UI, single-product detail view |
+| `WebApp.Blazor` | Інтерфейс чату, пошуку, порівняння та перегляду товару |
+| `Gateway.Api` | Автентифікований BFF і єдина API-точка входу для UI |
+| `ProductAdvisor.Api` | Агент, conversation orchestration, MCP server і deterministic tools |
+| `ProductCatalog.Api` | Товари, бренди, категорії, характеристики та параметричний пошук |
+| `PricingAvailability.Api` | Актуальні ціни, знижки, availability і freshness timestamp |
+| `PostgreSQL` | Окремі `catalogdb`, `pricingdb` та `advisordb` |
+| `.NET Aspire` | Локальна оркестрація, service discovery та observability dashboard |
 
-Each service owns its own data (separate schemas on one shared Postgres instance for this demo)
-and is reachable only through its documented HTTP API — see
-[`specs/001-smart-product-advisor/contracts/`](specs/001-smart-product-advisor/contracts/) for
-every endpoint's request/response shape.
+## Підключені джерела даних
 
-## Running locally
+| Джерело | Дані | Як використовується |
+|---|---|---|
+| Product Catalog | Назви, бренди, категорії та характеристики | Через внутрішній Catalog API і MCP read-only tools |
+| Pricing & Availability | Ціни, знижки, стан запасів і `asOf` | Через внутрішній Pricing API та batch lookup |
+| Advisor Database | Історія діалогу, `CurrentRequirement`, уточнення й останні результати | Структурована пам'ять агента |
+| LLM provider | Structured intent extraction і narration | Через `Microsoft.Extensions.AI`; підтримується OpenAI-compatible endpoint |
+| Google OAuth/OIDC | Ідентичність користувача | Вхід у WebApp та перевірка токена в Gateway |
+| OTLP backend | Traces, metrics і logs | Опційний експорт через OpenTelemetry |
 
-Requires the .NET 10 SDK and Docker Desktop (or a compatible engine) running.
+Демонстраційні Catalog і Pricing дані автоматично додаються під час локального запуску. Агент
+працює лише з approved retailer data і не шукає продуктові факти на довільних вебсайтах.
 
-**Option A — .NET Aspire** (primary dev path; starts Postgres, applies migrations, wires up
-service discovery, and opens the Aspire dashboard for live traces/logs/metrics):
+## Вимоги
 
-```bash
-dotnet run --project src/Aspire/AppHost
+- [.NET SDK 10](https://dotnet.microsoft.com/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) або сумісний Docker Engine
+- OpenAI-compatible LLM endpoint, API key і назва моделі
+- Google OAuth 2.0 Client ID типу **Web application**
+
+## Налаштування оточення
+
+Створіть у корені локальний файл `.env`. Не додавайте його до Git.
+
+```dotenv
+LLM_PROVIDER_ENDPOINT=https://your-openai-compatible-endpoint
+LLM_PROVIDER_API_KEY=replace-with-secret
+LLM_PROVIDER_MODEL=your-model-name
+
+INTERNAL_API_KEY=replace-with-long-random-secret
+
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# Опційно: зовнішній OpenTelemetry backend
+OTEL_EXPORTER_OTLP_ENDPOINT=
+OTEL_EXPORTER_OTLP_HEADERS=
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 ```
 
-**Option B — Docker Compose** (CI-parity fallback):
+Для Docker Compose додайте в Google Cloud Console redirect URI:
 
-```bash
+```text
+http://localhost:5000/signin-google
+```
+
+### Основні змінні
+
+| Змінна | Обов'язкова | Призначення |
+|---|---:|---|
+| `LLM_PROVIDER_ENDPOINT` | Так | OpenAI-compatible endpoint |
+| `LLM_PROVIDER_API_KEY` | Так | Credential LLM provider |
+| `LLM_PROVIDER_MODEL` | Так | Назва моделі |
+| `INTERNAL_API_KEY` | Так | Автентифікація внутрішніх API та MCP endpoint |
+| `GOOGLE_CLIENT_ID` | Так | Google OAuth client і перевірка audience |
+| `GOOGLE_CLIENT_SECRET` | Так | Google sign-in у WebApp |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Ні | Адреса зовнішнього OTLP backend |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Ні | Authentication headers OTLP backend |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | Ні | Рекомендовано `http/protobuf` |
+
+## Локальний запуск через Docker Compose
+
+Це найкоротший відтворюваний спосіб запустити всю систему.
+
+```powershell
 docker compose up --build
 ```
 
-Either way, an LLM provider must be configured (any `Microsoft.Extensions.AI`-compatible,
-OpenAI-style endpoint) via `LlmProvider__Endpoint` / `LlmProvider__ApiKey` / `LlmProvider__Model`
-— as environment variables for Docker Compose, or as Aspire parameters for the AppHost path.
-Never commit real values; see `render.yaml` for how these map to secrets in production.
+Після успішного старту відкрийте:
 
-The whole app also requires sign-in (FR-030) and an internal service credential (FR-029):
+```text
+http://localhost:5000
+```
 
-- `INTERNAL_API_KEY` — any shared secret string; Docker Compose defaults it to
-  `dev-internal-api-key` for local runs if unset, but a real value is required in `render.yaml`.
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — from a
-  [Google OAuth 2.0 Client ID](https://console.cloud.google.com/apis/credentials) (Web application
-  type), with `http://localhost:5000/signin-google` (Docker Compose) added as an authorized
-  redirect URI. WebApp performs the sign-in and needs both values; Gateway only needs
-  `GOOGLE_CLIENT_ID`, to validate the resulting token's audience against Google's own OIDC
-  discovery document (research.md §17) — it never talks to Google itself.
+Основні локальні endpoints:
 
-## Testing
+| Сервіс | URL |
+|---|---|
+| WebApp | `http://localhost:5000` |
+| Gateway | `http://localhost:5100` |
+| Catalog API | `http://localhost:5101` |
+| Pricing API | `http://localhost:5102` |
+| Advisor / MCP | `http://localhost:5103` |
+| PostgreSQL | `localhost:5432` |
 
-```bash
+Зупинка:
+
+```powershell
+docker compose down
+```
+
+## Локальний запуск через .NET Aspire
+
+Для розробки з dashboard, traces, metrics і logs:
+
+```powershell
+$env:LlmProvider__Endpoint="https://your-openai-compatible-endpoint"
+$env:LlmProvider__ApiKey="replace-with-secret"
+$env:LlmProvider__Model="your-model-name"
+$env:InternalApiKey="replace-with-long-random-secret"
+$env:Authentication__Google__ClientId="your-google-client-id"
+$env:Authentication__Google__ClientSecret="your-google-client-secret"
+
+dotnet run --project src/Aspire/AppHost
+```
+
+Aspire Dashboard буде доступний за URL, показаним у terminal. Для Google OAuth зареєструйте
+WebApp callback URL із суфіксом `/signin-google`; локальний HTTPS-профіль WebApp використовує
+`https://localhost:7188`.
+
+## Перевірка
+
+Запуск автоматичних тестів:
+
+```powershell
 dotnet test src/ProductAdvisor.slnx
 ```
 
-Runs every unit, domain, application, and contract test (contract tests spin up their own
-Testcontainers-managed Postgres — no manually-running stack required). The one suite that does
-need a live stack and a real LLM is `tests/EndToEnd.Tests`, which exercises full conversation
-scenarios against `docker compose up --build`:
+End-to-end тести потребують запущеного Docker Compose stack і налаштованого LLM provider:
 
-```bash
+```powershell
 docker compose up --build -d
 dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj
-docker compose down -v
+docker compose down
 ```
 
-### Agentic security and quality evals
+## Розгорнута система на Render
 
-`tests/EndToEnd.Tests/Evals/` holds the mandatory fifteen-class eval suite (spec.md
-FR-138–FR-141, data-model.md `EvalSuite`) — each class verifies a guarantee this system already
-makes elsewhere against the real, running stack; the suite defines no new behavior of its own,
-only test coverage over existing requirements (research.md §33). CI (`.github/workflows/ci.yml`,
-`agentic-evals` job) splits it in two:
+**Онлайн-версія:** [https://webapp-jcx5.onrender.com](https://webapp-jcx5.onrender.com)
 
-- **`CriticalEvals.cs`** (6 classes — grounding, authorization, cross-session access) **gates the
-  build at 100%**. Each is backed by a deterministic application-layer check — the Evidence
-  Envelope's allowed-claims check (FR-088), the tool-exposure surface scoped per route before the
-  model is invoked (FR-068), a plain session-ownership comparison (FR-031) — not model judgment,
-  so a failure here means the deterministic enforcement itself regressed, not that "the model
-  behaved unpredictably."
-- **`NonCriticalEvals.cs`** (the other 9 classes) run on every build and are reviewed, but never
-  block one. Each has a genuine model-behavior component under adversarial/ambiguous input — even
-  with every deterministic guard already in place, the model's specific wording can vary in ways
-  that don't compromise a hard guarantee but could still flap a narrowly-written assertion.
+Після відкриття система перенаправляє на Google для входу. Після авторизації дочекайтеся, поки
+екран `Starting up…` перевірить Gateway, Advisor, Catalog і Pricing API, а потім введіть запит
+природною мовою, наприклад: `Порадь ноутбук до 40 000 грн для навчання та програмування`.
 
-This split is spec.md's own Assumptions, recorded there explicitly as a documented, revisable
-judgment call rather than an implicit one — see spec.md's Assumptions and research.md §33 for the
-full rationale, including why PII/payment-data input (class 15) was *not* promoted to critical
-despite FR-115/FR-116 already being hard requirements regardless of which tier verifies them.
+Нюанси демонстраційного deployment:
 
-## Documentation
+- Усі п'ять компонентів працюють як окремі Render Free web services. Після 15 хвилин без
+  вхідного трафіку вони зупиняються, а перший запит запускає їх знову. Render вказує, що один
+  cold start зазвичай займає близько хвилини; через ланцюжок залежних сервісів перший запуск
+  усієї системи може бути довшим.
+- WebApp очікує готовність сервісів до чотирьох хвилин. Якщо частина системи ще запускається,
+  інтерфейс відкриється у degraded mode; зачекайте та повторіть запит.
+- Google OAuth є обов'язковим. У Google Cloud має бути зареєстрований callback
+  `https://webapp-jcx5.onrender.com/signin-google`. Якщо OAuth consent screen працює в режимі
+  `Testing`, Google-акаунт користувача потрібно додати до списку test users.
+- Free web services не приймають private-network traffic, тому внутрішні API взаємодіють через
+  публічні HTTPS hostnames. Вони захищені спільним `INTERNAL_API_KEY`; користувачеві потрібно
+  відкривати лише WebApp URL.
+- Локальна файлова система Render є ephemeral. Стан застосунку зберігається у зовнішніх
+  PostgreSQL databases, тому connection strings, SSL і backups мають бути налаштовані окремо.
+- Доступність відповіді також залежить від LLM provider і трьох databases. Безкоштовні інстанси
+  мають спільні місячні ліміти workspace та не призначені для гарантованого production traffic.
 
-- [`specs/001-smart-product-advisor/spec.md`](specs/001-smart-product-advisor/spec.md) — feature requirements and success criteria
-- [`specs/001-smart-product-advisor/plan.md`](specs/001-smart-product-advisor/plan.md) — architecture, tech stack, performance/scale goals
-- [`specs/001-smart-product-advisor/quickstart.md`](specs/001-smart-product-advisor/quickstart.md) — manual validation walkthrough for every user-facing scenario
-- [`specs/001-smart-product-advisor/data-model.md`](specs/001-smart-product-advisor/data-model.md) — entities and their relationships
-- [`specs/001-smart-product-advisor/research.md`](specs/001-smart-product-advisor/research.md) — the technical decisions behind the architecture, and why
-- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — the non-negotiable project principles (grounded facts, deterministic computation, resilience, observability)
+Актуальні обмеження платформи описані в
+[Render Free instances](https://render.com/docs/free) і
+[Render Web Services](https://render.com/docs/web-services).
 
-## Observability
+## Production deployment
 
-Locally, `dotnet run --project src/Aspire/AppHost` opens the Aspire Dashboard with live
-traces/logs/metrics for every service — no extra setup needed (`docker compose up` alone
-exports nothing, since there's no dashboard process to receive it).
+Файл [render.yaml](render.yaml) описує хмарний deployment усіх п'яти сервісів у Render.
+Production secrets задаються через dashboard платформи, а observability експортується в будь-який
+OTLP-compatible backend.
 
-In deployed environments (or to point Docker Compose at a real backend too), set
-`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_HEADERS` — every service already reads these
-standard OpenTelemetry env vars (`src/Aspire/ServiceDefaults/Extensions.cs`) and, when set,
-exports traces/metrics/logs via OTLP instead of (or alongside) the local dashboard
-(FR-027/FR-028, research.md §16). Any OTLP-compatible backend works; a convenient free-tier
-option is [Grafana Cloud](https://grafana.com/products/cloud/):
+Перед production deployment необхідно:
 
-1. Create a free Grafana Cloud stack, then find its OTLP endpoint under
-   **Connections → Add new connection → OpenTelemetry (OTLP)**.
-2. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to the shown endpoint URL, and
-   `OTEL_EXPORTER_OTLP_HEADERS` to `Authorization=Basic <base64(instanceId:apiKey)>` (Grafana
-   Cloud shows the exact value to copy).
-3. Set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` — the .NET SDK defaults to gRPC, but Grafana
-   Cloud's gateway (and most managed OTLP endpoints) only accept HTTP/protobuf; without this,
-   export fails silently with nothing in the app logs (`docker-compose.yml` already defaults
-   this for local runs; `render.yaml` sets it as a plain, non-secret value for all five).
-4. Apply the endpoint/headers to every service — `render.yaml` declares them (`sync: false`)
-   for all five; for Docker Compose, set them in `.env` before `docker compose up`.
-
-An unreachable/misconfigured OTLP backend never blocks a request — export failures are
-swallowed by the OpenTelemetry SDK's own batching/retry behavior, not surfaced to callers
-(FR-032, constitution Principle V).
-
-## Privacy & data protection (FR-114–FR-123)
-
-**Encryption in transit** (FR-121): every browser↔Gateway and Gateway↔service hop runs over
-HTTPS — Render terminates TLS at its edge for every web service in `render.yaml` by default, and
-`InternalApiKeyMiddleware` sits behind that, never in front of it. The Neon Postgres connection
-string (`ConnectionStrings__advisordb`/`catalogdb`/`pricingdb`, set as `sync: false` secrets in
-Render's dashboard, never committed) MUST use `sslmode=require` (or stronger) — Neon rejects
-plaintext connections by default, but this is configuration, not something this repo can assert
-about a live deployment without seeing that dashboard; verify it when configuring a new
-environment. System↔LLM-provider calls go through `OpenAIClient`/`Microsoft.Extensions.AI`,
-which only ever calls `https://` endpoints.
-
-**Encryption at rest** (FR-122): Neon Postgres encrypts data at rest by default (a platform
-guarantee, not an app-level setting) — this covers both the primary store and Neon's own
-backups/point-in-time-recovery data, so a backup is never a less-protected copy of the same data.
-
-**LLM provider requirements** (FR-123): the provider is deliberately kept swappable through
-`Microsoft.Extensions.AI.IChatClient` and pure configuration (`LlmProvider:Endpoint`/`ApiKey`/
-`Model`, research.md §10) — no specific provider is hard-coded. This means FR-123 (no training on
-submitted content, bounded/known retention, an acceptable data region) is a **deployment-time
-decision, not a code-level guarantee**: whoever configures `LlmProvider:*` for a given
-environment MUST confirm the chosen provider's current data-handling terms satisfy FR-123 before
-sending real conversation content to it — a provider that doesn't meet these MUST NOT be
-configured, regardless of any other capability it offers. This repository cannot verify a
-specific provider's policy on your behalf, since the configured provider is an operator choice
-made outside the codebase.
-
-## Deployment
-
-`render.yaml` defines a Render Blueprint (one free-tier web service per deployable) that
-auto-deploys on push to `main`; `.github/workflows/ci.yml` gates that with build/test/Docker
-image validation/EndToEnd stages first. Real connection strings and the LLM provider key are set
-in Render's dashboard, never committed.
+1. Задати окремий production `INTERNAL_API_KEY`.
+2. Додати production callback URL у Google OAuth configuration.
+3. Налаштувати LLM provider secrets.
+4. Налаштувати encrypted PostgreSQL databases і backups.
+5. За потреби задати OTLP endpoint та headers.

@@ -139,7 +139,15 @@ public sealed class GatewayApiClient(HttpClient httpClient, CurrentUserTokenProv
     private void AddAuthorization(HttpRequestMessage request)
     {
         var idToken = tokenProvider.IdToken
-            ?? throw new InvalidOperationException("The signed-in session has no Google id_token.");
+            ?? throw new MissingSignInTokenException();
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", idToken);
     }
 }
+
+/// <summary>
+/// Distinct from a generic <see cref="InvalidOperationException"/> (e.g. <see cref="GatewayApiClient.SendMessageAsync"/>'s
+/// "empty response" case) so the UI layer can tell "there is no sign-in token to send at all"
+/// apart from an unrelated failure and show the correct "please sign in again" message instead of
+/// a generic connectivity error.
+/// </summary>
+public sealed class MissingSignInTokenException() : InvalidOperationException("The signed-in session has no Google id_token.");

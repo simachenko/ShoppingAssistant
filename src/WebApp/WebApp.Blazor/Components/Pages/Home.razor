@@ -201,8 +201,12 @@
             var turn = await TryStreamingAsync(message) ?? await GatewayApi.SendMessageAsync(_sessionId, message, CancellationToken.None);
             ApplyTurnResult(turn);
         }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        catch (Exception ex) when (ex is MissingSignInTokenException
+            || (ex is HttpRequestException httpEx && httpEx.StatusCode == System.Net.HttpStatusCode.Unauthorized))
         {
+            // TryStreamingAsync (below) swallows its own exception and returns null on any
+            // failure, including this one — so this clause is what actually catches it, from the
+            // non-streaming fallback call that always runs afterward.
             Logger.LogWarning(ex, "Gateway rejected the chat request because the sign-in token is missing, invalid, or expired.");
             _errorMessage = "Your sign-in session has expired. Please sign out and sign in again.";
         }
@@ -263,7 +267,10 @@
 
         var narration = turn.Type switch
         {
-            "clarification" => turn.Question ?? "",
+            // Deliberately NOT turn.Question here — the "clarification" alert box below already
+            // renders it (line ~40); including it here too duplicated the same question text in
+            // both the plain chat bubble and the alert box.
+            "clarification" => "",
             "recommendation" or "comparison" or "checkoutLink" => turn.Message ?? "",
             _ => "",
         };

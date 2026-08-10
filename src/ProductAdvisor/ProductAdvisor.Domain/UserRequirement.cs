@@ -16,6 +16,12 @@ public sealed record UserRequirement
     public string Currency { get; init; } = "USD";
     public string? Units { get; init; }
 
+    /// <summary>How many recommendation items the shopper explicitly asked for (e.g. "just the
+    /// best one"); null means no limit was ever stated — every qualifying item is returned,
+    /// ranked. Carries forward across turns exactly like every other field here, until the
+    /// shopper states a different limit or otherwise revises it.</summary>
+    public int? ResultLimit { get; init; }
+
     /// <summary>
     /// The essential-information bar (FR-002/SC-005): a recommendation may only be produced
     /// once both Category and Budget are known — otherwise a ClarificationQuestion is required.
@@ -45,6 +51,7 @@ public sealed record UserRequirement
             Language = patch.Language ?? Language,
             Currency = patch.Currency ?? Currency,
             Units = patch.Units ?? Units,
+            ResultLimit = patch.ResultLimit ?? ResultLimit,
         };
     }
 }

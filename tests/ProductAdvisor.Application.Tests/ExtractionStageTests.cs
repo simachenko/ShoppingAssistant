@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using ProductAdvisor.Application.Pipeline;
 using ProductAdvisor.Domain;
 using Xunit;
@@ -19,7 +20,7 @@ public class ExtractionStageTests
         var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
         var result = await stage.ExtractAsync(
-            UserRequirement.Empty, "I need a smartphone under 15000 UAH", CancellationToken.None);
+            UserRequirement.Empty, [], "I need a smartphone under 15000 UAH", CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Equal(Intent.Recommend, result.Intent);
@@ -33,7 +34,7 @@ public class ExtractionStageTests
         var chatClient = new FakeChatClient(ExtractionJson.Malformed, ExtractionJson.Recommend("laptops", 30000m, "UAH"));
         var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
-        var result = await stage.ExtractAsync(UserRequirement.Empty, "a laptop under 30000", CancellationToken.None);
+        var result = await stage.ExtractAsync(UserRequirement.Empty, [], "a laptop under 30000", CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Equal("laptops", result.RequirementPatch?.Category);
@@ -46,7 +47,7 @@ public class ExtractionStageTests
         var chatClient = new FakeChatClient(ExtractionJson.Malformed, ExtractionJson.Malformed);
         var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
-        var result = await stage.ExtractAsync(UserRequirement.Empty, "gibberish", CancellationToken.None);
+        var result = await stage.ExtractAsync(UserRequirement.Empty, [], "gibberish", CancellationToken.None);
 
         Assert.Null(result);
         Assert.Equal(2, chatClient.CallCount);
@@ -58,7 +59,7 @@ public class ExtractionStageTests
         var chatClient = new FakeChatClient(ExtractionJson.UnrecognizedIntent(), ExtractionJson.UnrecognizedIntent());
         var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
-        var result = await stage.ExtractAsync(UserRequirement.Empty, "do something else entirely", CancellationToken.None);
+        var result = await stage.ExtractAsync(UserRequirement.Empty, [], "do something else entirely", CancellationToken.None);
 
         Assert.Null(result);
         Assert.Equal(2, chatClient.CallCount);
@@ -70,10 +71,28 @@ public class ExtractionStageTests
         var chatClient = new FakeChatClient(ExtractionJson.Compare(["Galaxy S24", "Pixel 9"]));
         var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
 
-        var result = await stage.ExtractAsync(UserRequirement.Empty, "compare Galaxy S24 and Pixel 9", CancellationToken.None);
+        var result = await stage.ExtractAsync(UserRequirement.Empty, [], "compare Galaxy S24 and Pixel 9", CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Equal(Intent.Compare, result.Intent);
         Assert.Equal(["Galaxy S24", "Pixel 9"], result.ProductReferences);
+    }
+
+    [Fact]
+    public async Task Previously_shown_products_are_listed_in_the_prompt_so_a_collective_reference_like_compare_them_can_resolve()
+    {
+        var chatClient = new FakeChatClient(ExtractionJson.Compare(["Galaxy S24", "Pixel 9"]));
+        var stage = new ExtractionStage(chatClient, TestTurnMetrics.Instance);
+        var lastSearchResults = new[]
+        {
+            new SearchResultReference(Guid.NewGuid(), "Galaxy S24"),
+            new SearchResultReference(Guid.NewGuid(), "Pixel 9"),
+        };
+
+        await stage.ExtractAsync(UserRequirement.Empty, lastSearchResults, "compare them", CancellationToken.None);
+
+        var systemPrompt = chatClient.LastMessages?.First(m => m.Role == ChatRole.System).Text ?? "";
+        Assert.Contains("Galaxy S24", systemPrompt, StringComparison.Ordinal);
+        Assert.Contains("Pixel 9", systemPrompt, StringComparison.Ordinal);
     }
 }

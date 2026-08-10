@@ -193,6 +193,64 @@ public class ScoringPolicyTests
     }
 
     [Fact]
+    public void An_explicit_result_limit_truncates_items_to_that_many_top_ranked_candidates()
+    {
+        var requirement = new UserRequirement
+        {
+            Category = "smartphones",
+            Budget = new Money(15000m, "UAH"),
+            Preferences = ["battery_mah"],
+            ResultLimit = 1,
+        };
+        var best = Candidate("Best Battery", 14000m, specs: ("battery_mah", "5000", "mAh"));
+        var worst = Candidate("Worst Battery", 14000m, specs: ("battery_mah", "3000", "mAh"));
+
+        var result = ScoringPolicy.Score(requirement, [worst, best]);
+
+        Assert.Single(result.Items);
+        Assert.Equal("Best Battery", result.Items[0].Candidate.Name);
+    }
+
+    [Fact]
+    public void A_result_limit_never_changes_what_best_in_budget_means_for_trade_off_text()
+    {
+        // Regression: truncating to the top N must happen only after trade-offs are computed
+        // against the *entire* qualifying set — otherwise the shown item's "below the best
+        // option" comparison would silently compare against a smaller, truncated set instead of
+        // the real best available.
+        var requirement = new UserRequirement
+        {
+            Category = "smartphones",
+            Budget = new Money(15000m, "UAH"),
+            // Two matched preferences vs. one gives "Shown Phone" an unambiguously higher score
+            // (not a tie broken alphabetically), so which item survives truncation is
+            // deterministic here regardless of preference-matching's own presence-only semantics.
+            Preferences = ["camera_mp", "storage_gb"],
+            ResultLimit = 1,
+        };
+        var shown = Candidate("Shown Phone", 14000m, specs: [("camera_mp", "50", "MP"), ("storage_gb", "256", "GB"), ("battery_mah", "3000", "mAh")]);
+        var notShownButBestBattery = Candidate("Hidden Phone", 14000m, specs: [("camera_mp", "10", "MP"), ("battery_mah", "5000", "mAh")]);
+
+        var result = ScoringPolicy.Score(requirement, [shown, notShownButBestBattery]);
+
+        Assert.Single(result.Items);
+        Assert.Equal("Shown Phone", result.Items[0].Candidate.Name);
+        Assert.Contains(result.Items[0].TradeOffs, t => t.Contains("battery_mah") && t.Contains("5000"));
+    }
+
+    [Fact]
+    public void No_result_limit_returns_every_qualifying_candidate_unchanged()
+    {
+        var requirement = new UserRequirement { Category = "smartphones", Budget = new Money(15000m, "UAH") };
+        var a = Candidate("Phone A", 14000m);
+        var b = Candidate("Phone B", 14500m);
+
+        var result = ScoringPolicy.Score(requirement, [a, b]);
+
+        Assert.Equal(2, result.Items.Count);
+    }
+
+    [Fact]
     public void Scoring_is_deterministic_across_repeated_calls()
     {
         var requirement = new UserRequirement

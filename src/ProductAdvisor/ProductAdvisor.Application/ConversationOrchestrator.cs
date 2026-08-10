@@ -231,7 +231,8 @@ public sealed partial class ConversationOrchestrator(
     private async Task<(StructuredIntent? Intent, Route Route)> ClassifyAndRouteAsync(
         ConversationSession session, string userMessage, CancellationToken cancellationToken)
     {
-        var intent = await extractionStage.ExtractAsync(session.CurrentRequirement, userMessage, cancellationToken);
+        var intent = await extractionStage.ExtractAsync(
+            session.CurrentRequirement, session.LastSearchResults, userMessage, cancellationToken);
         if (intent is null)
         {
             LogTurnClassified(ExtractionStage.PromptVersion, Route.Clarify);

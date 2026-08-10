@@ -38,6 +38,15 @@ public sealed record RequirementPatch
     public string? Language { get; init; }
     public string? Currency { get; init; }
     public string? Units { get; init; }
+
+    /// <summary>
+    /// How many recommendation items the user explicitly asked for (e.g. "just the best one",
+    /// "top 3") — null means "not mentioned this turn," the same carry-forward-until-changed
+    /// semantics every other field here already has. A non-positive value is mapped to null
+    /// before it ever reaches this type (the extraction stage's DTO-to-domain mapping) — it is
+    /// treated the same as "not mentioned" rather than crashing or producing an empty recommendation.
+    /// </summary>
+    public int? ResultLimit { get; init; }
 }
 
 /// <summary>

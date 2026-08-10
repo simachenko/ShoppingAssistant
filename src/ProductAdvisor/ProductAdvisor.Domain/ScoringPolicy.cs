@@ -56,12 +56,21 @@ public static class ScoringPolicy
             };
         }
 
+        // Trade-offs (BuildRecommendedItem, above) are computed from the *entire* qualifying set
+        // ("below the best option in this budget") before any limit is applied below — an
+        // explicit ResultLimit narrows which items are shown, it must never change what "best in
+        // this budget" means for the ones that are.
         var items = qualifying
             .Select(candidate => BuildRecommendedItem(candidate, requirement, qualifying))
             .OrderByDescending(i => i.Candidate.PriceVerified)
             .ThenByDescending(i => i.Score)
             .ThenBy(i => i.Candidate.Name, StringComparer.Ordinal)
             .ToList();
+
+        if (requirement.ResultLimit is { } limit)
+        {
+            items = items.Take(limit).ToList();
+        }
 
         return new Recommendation { RecommendationId = Guid.NewGuid(), Items = items, UnmetConstraintExplanation = null };
     }
