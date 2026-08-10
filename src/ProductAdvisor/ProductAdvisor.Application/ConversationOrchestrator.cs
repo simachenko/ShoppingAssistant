@@ -23,7 +23,8 @@ public sealed class ConversationOrchestrator(
     IAdvisorToolCatalog toolCatalog,
     IToolResultCapture resultCapture,
     ExtractionStage extractionStage,
-    IRecommendationService recommendationService)
+    IRecommendationService recommendationService,
+    TurnResourceBudgetGuard budgetGuard)
 {
     private const string LegacyToolSystemPrompt = """
         You are a retail product advisor. The shopper's request has already been classified as
@@ -55,16 +56,26 @@ public sealed class ConversationOrchestrator(
 
         session.AddMessage(new ConversationMessage("user", userMessage, DateTimeOffset.UtcNow));
 
-        var (intent, route) = await ClassifyAndRouteAsync(session, userMessage, cancellationToken);
-
-        var result = route switch
+        AdvisorTurnResult result;
+        try
         {
-            Route.Clarify => HandleClarify(session, intent),
-            Route.Smalltalk => await HandleSmalltalkAsync(userMessage, cancellationToken),
-            Route.Unsupported => HandleUnsupported(),
-            Route.Recommend => await HandleRecommendAsync(session, cancellationToken),
-            _ => await RunLegacyToolContinuationAsync(session, route, cancellationToken),
-        };
+            result = await budgetGuard.RunAsync(async ct =>
+            {
+                var (intent, route) = await ClassifyAndRouteAsync(session, userMessage, ct);
+                return route switch
+                {
+                    Route.Clarify => HandleClarify(session, intent),
+                    Route.Smalltalk => await HandleSmalltalkAsync(userMessage, ct),
+                    Route.Unsupported => HandleUnsupported(),
+                    Route.Recommend => await HandleRecommendAsync(session, ct),
+                    _ => await RunLegacyToolContinuationAsync(session, route, ct),
+                };
+            }, cancellationToken);
+        }
+        catch (TurnBudgetExceededException ex)
+        {
+            result = AdvisorTurnResult.ForError(ex.Message, ex.Degraded);
+        }
 
         session.AddMessage(new ConversationMessage(
             "assistant", result.Message ?? result.Question ?? string.Empty, DateTimeOffset.UtcNow));
@@ -151,9 +162,15 @@ public sealed class ConversationOrchestrator(
                     break;
                 }
 
-            default: // Compare, Checkout, ProductFact — the Phase-10 tool-recipe bridge.
+            default: // Compare, Checkout, ProductFact — the tool-recipe bridge (FR-066–FR-070).
                 {
-                    var chatOptions = new ChatOptions { Tools = [.. toolCatalog.GetTools()] };
+                    // The turn-level resource budget (overall timeout, max tool calls, max
+                    // consecutive tool errors) is enforced for the non-streaming entry point
+                    // only — data-model.md's TurnResourceBudget explicitly allows the streaming
+                    // endpoint's fail-safe on overall timeout to be "no result event" rather than
+                    // a gracefully streamed `error`, since a mid-stream `yield return` cannot sit
+                    // inside a try/catch. The tool-recipe scoping below still applies equally.
+                    var chatOptions = new ChatOptions { Tools = [.. toolCatalog.GetTools(route)] };
                     var narrationBuilder = new StringBuilder();
                     await foreach (var update in chatClient.GetStreamingResponseAsync(
                         BuildLegacyChatHistory(session), chatOptions, cancellationToken))
@@ -258,8 +275,30 @@ public sealed class ConversationOrchestrator(
     private async Task<AdvisorTurnResult> RunLegacyToolContinuationAsync(
         ConversationSession session, Route route, CancellationToken cancellationToken)
     {
-        var chatOptions = new ChatOptions { Tools = [.. toolCatalog.GetTools()] };
-        var response = await chatClient.GetResponseAsync(BuildLegacyChatHistory(session), chatOptions, cancellationToken);
+        // FR-066–FR-070: never the full seven-tool catalog — only this route's fixed recipe.
+        var chatOptions = new ChatOptions { Tools = [.. toolCatalog.GetTools(route)] };
+
+        ChatResponse response;
+        try
+        {
+            response = await chatClient.GetResponseAsync(BuildLegacyChatHistory(session), chatOptions, cancellationToken);
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested is false)
+        {
+            // The shared chat client's own MaximumConsecutiveErrorsPerRequest budget was
+            // exhausted — the underlying tool exception propagates as-is out of
+            // GetResponseAsync (see TurnResourceBudgetGuard). A persistently failing tool is an
+            // honest, retryable turn failure (FR-079), not silently swallowed.
+            throw new TurnBudgetExceededException(
+                "One of the tools this request needed failed repeatedly and could not complete.", degraded: true);
+        }
+
+        if (TurnResourceBudgetGuard.ExceededToolCallBudget(response))
+        {
+            throw new TurnBudgetExceededException(
+                "This request needed more steps than allowed and could not be completed.", degraded: true);
+        }
+
         return FinalizeLegacyTurn(session, response.Text, route);
     }
 

@@ -12,7 +12,14 @@ public sealed record ConversationTurnResponse(
     IReadOnlyList<string>? Criteria = null,
     IReadOnlyList<ComparisonRowResponse>? Rows = null,
     string? Url = null,
-    IReadOnlyList<Guid>? ProductIds = null);
+    IReadOnlyList<Guid>? ProductIds = null,
+    IReadOnlyList<NearestAlternativeResponse>? NearestAlternatives = null,
+    bool? Degraded = null);
+
+public sealed record NearestAlternativeResponse(
+    Guid ProductId,
+    string Name,
+    IReadOnlyList<string> ViolatedConstraints);
 
 public sealed record ComparisonRowResponse(
     Guid ProductId,

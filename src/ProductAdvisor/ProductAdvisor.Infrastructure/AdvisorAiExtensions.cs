@@ -20,6 +20,13 @@ public static class AdvisorAiExtensions
         var apiKey = builder.Configuration["LlmProvider:ApiKey"];
         var model = builder.Configuration["LlmProvider:Model"];
 
+        // spec.md FR-071–FR-079 (data-model.md TurnResourceBudget): these two loop-shaped limits
+        // are enforced by the function-invocation middleware's own configuration rather than a
+        // separate counter — see TurnResourceBudgetGuard for the empirically-verified behavior
+        // (graceful stop vs. thrown exception) this relies on.
+        var maxToolCalls = builder.Configuration.GetValue("TurnResourceBudget:MaxToolCallsPerTurn", 6);
+        var maxConsecutiveErrors = builder.Configuration.GetValue("TurnResourceBudget:MaxConsecutiveToolErrors", 2);
+
         builder.Services.AddChatClient(_ =>
         {
             var options = new OpenAIClientOptions();
@@ -32,7 +39,14 @@ public static class AdvisorAiExtensions
             var openAiClient = new OpenAIClient(credential, options);
             return openAiClient.GetChatClient(string.IsNullOrWhiteSpace(model) ? "gpt-4o-mini" : model).AsIChatClient();
         })
-        .UseFunctionInvocation();
+        .UseFunctionInvocation(configure: c =>
+        {
+            c.MaximumIterationsPerRequest = maxToolCalls;
+            c.MaximumConsecutiveErrorsPerRequest = maxConsecutiveErrors;
+            // FR-069: a compute/terminal tool call must never run concurrently with another
+            // tool call within the same turn.
+            c.AllowConcurrentInvocation = false;
+        });
 
         return builder;
     }

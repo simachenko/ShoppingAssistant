@@ -28,7 +28,7 @@ public class TurnProcessingCycleTests
         var recommendationService = new FakeRecommendationService(recommendation);
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient), recommendationService);
+            new ExtractionStage(chatClient), recommendationService, TestBudgetGuard.Generous);
 
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var result = await orchestrator.ProcessMessageAsync(
@@ -49,7 +49,8 @@ public class TurnProcessingCycleTests
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
-            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }));
+            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            TestBudgetGuard.Generous);
 
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
         var result = await orchestrator.ProcessMessageAsync(session, "something vague", CancellationToken.None);
@@ -67,13 +68,13 @@ public class TurnProcessingCycleTests
         var orchestrator1 = new ConversationOrchestrator(
             chatClient1, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient1),
-            new FakeRecommendationService(recommendation));
+            new FakeRecommendationService(recommendation), TestBudgetGuard.Generous);
 
         var chatClient2 = new FakeChatClient(ExtractionJson.Recommend("smartphones", 15000m, "UAH"), "narration");
         var orchestrator2 = new ConversationOrchestrator(
             chatClient2, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient2),
-            new FakeRecommendationService(recommendation));
+            new FakeRecommendationService(recommendation), TestBudgetGuard.Generous);
 
         var result1 = await orchestrator1.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "user-a"), "I need a smartphone under 15000 UAH", CancellationToken.None);

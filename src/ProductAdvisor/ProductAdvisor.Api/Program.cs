@@ -26,6 +26,10 @@ builder.Services.AddScoped<ComputeTools>();
 builder.Services.AddScoped<IAdvisorToolCatalog, AdvisorToolCatalog>();
 builder.Services.AddScoped<IRecommendationService, RecommendationService>();
 builder.Services.AddScoped<ExtractionStage>();
+builder.Services.Configure<TurnResourceBudgetOptions>(builder.Configuration.GetSection(TurnResourceBudgetOptions.SectionName));
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<TurnResourceBudgetOptions>>().Value);
+builder.Services.AddScoped<TurnResourceBudgetGuard>();
 builder.Services.AddScoped<ConversationOrchestrator>();
 builder.Services.AddScoped<IConversationSessionRepository, ConversationSessionRepository>();
 builder.Services.AddSingleton<ConversationTurnGate>();

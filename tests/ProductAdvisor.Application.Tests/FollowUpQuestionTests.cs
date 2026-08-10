@@ -35,7 +35,8 @@ public class FollowUpQuestionTests
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
-            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }));
+            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            TestBudgetGuard.Generous);
 
         await orchestrator.ProcessMessageAsync(session, "Tell me more about the first one", CancellationToken.None);
 
@@ -58,7 +59,8 @@ public class FollowUpQuestionTests
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
-            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }));
+            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            TestBudgetGuard.Generous);
 
         await orchestrator.ProcessMessageAsync(session, "the first one, please", CancellationToken.None);
 

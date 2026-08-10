@@ -959,51 +959,118 @@ confirm the turn ends in `error` with zero further tool calls.
 
 ### Tests for This Phase
 
-- [ ] T135 [P] Unit tests for `TurnResult` type assignment — absence of `recommendation`/
+- [X] T135 [P] Unit tests for `TurnResult` type assignment — absence of `recommendation`/
       `comparison`/`checkoutLink` never defaults to `clarification`; `product_fact` with a
       validated tool result → `answer`; `unsupported` intent → `unsupported`; a tool-result
       validation failure → `error` — in `tests/ProductAdvisor.Application.Tests/TurnResultTypeTests.cs`
-      (FR-060–FR-065).
-- [ ] T136 [P] Contract tests for tool-exposure scoping — a `recommend`-route turn's tool-list
+      (FR-060–FR-065). 7 tests: orchestrator-level discrimination (`unsupported`→`unsupported`
+      with zero narration calls, `smalltalk`→`answer`, an empty-`Items` `recommend` turn stays
+      `recommendation` not `clarification`) plus mapper-level coverage of the new `error`/
+      `nearestAlternatives` wire shapes added by this phase.
+- [X] T136 [P] Contract tests for tool-exposure scoping — a `recommend`-route turn's tool-list
       surface never includes `compare_products`/`generate_checkout_link`; `smalltalk`/
       `unsupported` make zero tool calls; a `product_fact` turn calls only the tool(s) its
       specific fact needs — in `tests/ProductAdvisor.Api.Tests/ToolRecipeScopingTests.cs`
-      (FR-066–FR-070).
-- [ ] T137 [P] Tests for each `TurnResourceBudget` limit's fail-safe (max tool calls, max
+      (FR-066–FR-070). **Not run in this sandbox** (Docker/Testcontainers unavailable, same
+      limitation as T026/T044/T118/T134) — confirmed to compile only. Required a new
+      `ExtractionAwareScriptedChatClient` (this project's pre-existing `ScriptedChatClient`
+      predates Phase 9's extraction-first pipeline and always returns one fixed response
+      regardless of call number, so it cannot express "first call must be valid StructuredIntent
+      JSON before a route call is reachable at all"). Note: the rest of
+      `ProductAdvisor.Api.Tests` (written before Phase 9) still assumes the old free-form
+      single-call loop and is very likely stale against the current pipeline — a pre-existing,
+      already-disclosed gap (Phase 9's completion notes) this task does not attempt to close, since
+      it cannot be verified here either way.
+- [X] T137 [P] Tests for each `TurnResourceBudget` limit's fail-safe (max tool calls, max
       consecutive tool errors, max loop iterations, overall timeout each → `error`, never a
       partial success or an infinite loop) in
-      `tests/ProductAdvisor.Application.Tests/TurnResourceBudgetTests.cs` (FR-071–FR-079).
-- [ ] T138 [P] Unit tests for hard-constraint filtering — an over-budget, currency-mismatched,
+      `tests/ProductAdvisor.Application.Tests/TurnResourceBudgetTests.cs` (FR-071–FR-079). 5
+      tests, 2 directly against `TurnResourceBudgetGuard` (its own timeout → degraded `error`; a
+      caller's own cancellation token propagates unhandled rather than becoming a result — FR-024's
+      disconnect case) and 3 through the full orchestrator via a new `ScriptedChatClient` (in
+      `ProductAdvisor.Application.Tests`) capable of hanging, throwing, or returning a
+      trailing-tool-call response on its second (route) call.
+- [X] T138 [P] Unit tests for hard-constraint filtering — an over-budget, currency-mismatched,
       missing-required-feature, or (when explicitly stated) out-of-stock candidate is excluded
       from `Items`; a soft-preference-only mismatch never excludes a candidate;
       `NearestAlternatives` never appears alongside a non-empty `Items` — in
-      `tests/ProductAdvisor.Domain.Tests/ScoringPolicyHardConstraintTests.cs` (FR-080–FR-085).
+      `tests/ProductAdvisor.Domain.Tests/ScoringPolicyHardConstraintTests.cs` (FR-080–FR-085). 8
+      tests. Also updated one pre-existing `ScoringPolicyTests` test
+      (`Score_ranks_candidates_matching_more_required_features_higher`) that had relied on the
+      now-superseded soft-ranking-only treatment of `RequiredFeatures` — rewritten to use
+      `Preferences` instead so it still tests ranking, not exclusion.
 
 ### Implementation for This Phase
 
-- [ ] T139 [P] Add the `TurnResult` discriminated shape (`answer`/`clarification`/
+- [X] T139 [P] Add the `TurnResult` discriminated shape (`answer`/`clarification`/
       `recommendation`/`comparison`/`checkoutLink`/`unsupported`/`error`) per data-model.md,
       replacing the current four-shape response mapper, in
       `src/ProductAdvisor/ProductAdvisor.Application/TurnResult.cs` (depends on T135).
-- [ ] T140 Implement per-route `ToolRecipe` scoping — the tool-list surface presented for a turn
+      **Deviates from the planned file path**: six of the seven types already existed on
+      `AdvisorTurnResult` (this codebase's `TurnResult` — Phase 9 introduced `answer`/
+      `unsupported` alongside the earlier `clarification`/`recommendation`/`comparison`/
+      `checkoutLink`), so this task added only the missing `error` type
+      (`AdvisorTurnResult.ForError(message, degraded)`) plus the `Degraded` field, and the
+      matching `ConversationApiMapper`/`ConversationTurnResponse` wire-shape support, rather than
+      introducing a second, competing `TurnResult` type.
+- [X] T140 Implement per-route `ToolRecipe` scoping — the tool-list surface presented for a turn
       (whatever invokes it) is limited to exactly that route's recipe before any language-model
       call — in `src/ProductAdvisor/ProductAdvisor.Infrastructure/ToolRecipes/` (depends on
-      T133, T136).
-- [ ] T141 Implement `TurnResourceBudget` enforcement — max primary LLM calls (2 + 1 repair), max
+      T133, T136). `ToolRecipe.GetAllowedToolNames(Route)` plus a new
+      `IAdvisorToolCatalog.GetTools(Route)` overload; `ConversationOrchestrator`'s legacy
+      tool-invocation bridge (`compare`/`checkout`/`product_fact`, both the streaming and
+      non-streaming entry points) now calls this instead of the unscoped `GetTools()`.
+- [X] T141 Implement `TurnResourceBudget` enforcement — max primary LLM calls (2 + 1 repair), max
       tool calls, max consecutive tool errors, max loop iterations, overall turn timeout,
       cancellation-on-disconnect releasing the FR-024 in-flight marker, non-idempotent-operation
       exclusion from automatic retry — in
       `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/TurnResourceBudgetGuard.cs`
-      (depends on T134, T137).
-- [ ] T142 Extend `ScoringPolicy` (T035) to a two-phase hard-constraint filter (budget as
+      (depends on T134, T137). Max tool calls / max consecutive tool errors are enforced by the
+      shared `IChatClient`'s own `FunctionInvokingChatClient.MaximumIterationsPerRequest`/
+      `MaximumConsecutiveErrorsPerRequest` (now configured in `AdvisorAiExtensions` from a new
+      `TurnResourceBudget` config section) rather than re-implemented — the framework's own
+      supported mechanism for the same guarantee. Their exact behavior when a limit is hit isn't
+      documented on the public API surface, so it was verified empirically with a throwaway
+      harness before relying on it (same approach as Phase 9's serializer-options bug): reaching
+      `MaximumIterationsPerRequest` returns the response gracefully with a trailing, never-invoked
+      tool call (detected by `TurnResourceBudgetGuard.ExceededToolCallBudget`); reaching
+      `MaximumConsecutiveErrorsPerRequest` re-throws the underlying tool exception out of
+      `GetResponseAsync`. `TurnResourceBudgetGuard.RunAsync` adds the one limit that mechanism
+      doesn't cover — the overall wall-clock timeout, via a linked, `CancelAfter`
+      `CancellationTokenSource` — and distinguishes its own timeout (→ `TurnBudgetExceededException`,
+      translated to a degraded `error`) from the caller's own cancellation token firing (a client
+      disconnect, left to propagate unhandled so no result is persisted, per FR-024).
+      `AllowConcurrentInvocation = false` was also set (FR-069: a compute/terminal tool call must
+      never run concurrently with another tool call). **Scope note**: full budget enforcement
+      (timeout + tool-call/consecutive-error translation to `error`) applies to the non-streaming
+      `ProcessMessageAsync` entry point; the streaming entry point applies the same tool-recipe
+      scoping (T140) but not the timeout wrapper, since a mid-stream `yield return` cannot sit
+      inside a `try`/`catch` — data-model.md's `TurnResourceBudget` explicitly allows the
+      streaming endpoint's fail-safe on overall timeout to be "no `result` event" rather than a
+      gracefully streamed `error`.
+- [X] T142 Extend `ScoringPolicy` (T035) to a two-phase hard-constraint filter (budget as
       ceiling, required features, explicit availability requirement, currency compatibility) +
       soft-preference rank, producing `NearestAlternative` entries with `ViolatedConstraints` for
       excluded candidates, in `src/ProductAdvisor/ProductAdvisor.Domain/ScoringPolicy.cs`
-      (depends on T138).
-- [ ] T143 Extend the `get_recommendations` MCP tool's input (`availabilityRequirements`) and
+      (depends on T138). Per spec.md's Assumptions (added during this session's consistency
+      review), `NearestAlternatives` is populated only when `Items` ends up empty — never
+      alongside a non-empty `Items` — so a verified hard-constraint violator sitting alongside
+      other qualifying candidates is simply omitted from the response, not surfaced as an
+      "alternative". A price-unverified candidate still skips the budget/currency check entirely
+      (nothing to confirm, FR-005) but is still subject to the required-feature check (read from
+      catalog specification data, not pricing data, so always independently confirmable).
+- [X] T143 Extend the `get_recommendations` MCP tool's input (`availabilityRequirements`) and
       output (`nearestAlternatives`) per contracts/advisor-mcp-tools.md, in
       `src/ProductAdvisor/ProductAdvisor.Infrastructure/Tools/ComputeTools.cs` (depends on T142;
-      extends T038).
+      extends T038). `nearestAlternatives` needed no separate tool-output change — it flows
+      automatically as part of the `Recommendation` T142 already extended.
+
+**Verification**: `dotnet build` — 0 errors, 0 new warnings (same pre-existing NU1902/MSB3277
+warnings as before this phase); `dotnet format --verify-no-changes` clean on every file this
+phase touched. `ProductAdvisor.Domain.Tests`: 58/58 passing (49 + 9 new). `ProductAdvisor.Application.Tests`:
+35/35 passing (24 + 11 new). `ProductAdvisor.Api.Tests`/`EndToEnd.Tests` confirmed to still
+compile against every signature change in this phase, but — as with T026/T044/T118/T134 — not run
+here (Docker/Testcontainers unavailable in this sandbox).
 
 **Checkpoint**: Every turn's outcome is precisely typed and traceable to policy + tool outcome
 alone; no turn can run away on tool calls or loop iterations; recommendations never silently

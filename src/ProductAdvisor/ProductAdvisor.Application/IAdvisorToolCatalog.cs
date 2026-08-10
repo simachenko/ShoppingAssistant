@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using ProductAdvisor.Application.Pipeline;
 
 namespace ProductAdvisor.Application;
 
@@ -10,4 +11,10 @@ namespace ProductAdvisor.Application;
 public interface IAdvisorToolCatalog
 {
     IReadOnlyList<AITool> GetTools();
+
+    /// <summary>
+    /// The full catalog scoped to exactly the given route's <c>ToolRecipe</c> (spec.md
+    /// FR-066–FR-070) — never the full seven-tool catalog for a route that doesn't need it.
+    /// </summary>
+    IReadOnlyList<AITool> GetTools(Route route);
 }

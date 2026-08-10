@@ -148,19 +148,22 @@ public class ScoringPolicyTests
     }
 
     [Fact]
-    public void Score_ranks_candidates_matching_more_required_features_higher()
+    public void Score_ranks_candidates_matching_more_soft_preferences_higher()
     {
+        // Preferences (unlike RequiredFeatures, FR-080/FR-083) only affect ranking — both
+        // candidates remain eligible regardless of match.
         var requirement = new UserRequirement
         {
             Category = "smartphones",
             Budget = new Money(15000m, "UAH"),
-            RequiredFeatures = ["camera_mp"],
+            Preferences = ["camera_mp"],
         };
         var withCamera = Candidate("Camera Phone", 14000m, specs: ("camera_mp", "50", "MP"));
         var withoutCamera = Candidate("Basic Phone", 14000m, specs: ("battery_mah", "3000", "mAh"));
 
         var result = ScoringPolicy.Score(requirement, [withoutCamera, withCamera]);
 
+        Assert.Equal(2, result.Items.Count);
         Assert.Equal("Camera Phone", result.Items[0].Candidate.Name);
         Assert.Contains("camera_mp", result.Items[0].MatchedRequirements);
     }

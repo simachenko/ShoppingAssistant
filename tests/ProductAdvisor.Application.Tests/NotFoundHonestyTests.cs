@@ -29,7 +29,8 @@ public class NotFoundHonestyTests
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), capture,
             new ExtractionStage(chatClient),
-            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }));
+            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            TestBudgetGuard.Generous);
 
         var result = await orchestrator.ProcessMessageAsync(
             session, "Is the Nokia 3310 Pro in stock?", CancellationToken.None);
@@ -50,7 +51,8 @@ public class NotFoundHonestyTests
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
-            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }));
+            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            TestBudgetGuard.Generous);
 
         await orchestrator.ProcessMessageAsync(session, "Tell me about the XYZ9000", CancellationToken.None);
 
@@ -68,7 +70,8 @@ public class NotFoundHonestyTests
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
-            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }));
+            new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            TestBudgetGuard.Generous);
 
         var result = await orchestrator.ProcessMessageAsync(session, "compare the first one and the second one", CancellationToken.None);
 

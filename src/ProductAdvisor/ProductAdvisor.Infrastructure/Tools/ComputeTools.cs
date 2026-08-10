@@ -29,6 +29,7 @@ public sealed class ComputeTools(
         [Description("Budget currency, ISO 4217, e.g. UAH")] string budgetCurrency,
         [Description("Required features/specs, free text, e.g. 'camera_mp'")] IReadOnlyList<string>? requiredFeatures = null,
         [Description("Soft preferences, free text")] IReadOnlyList<string>? preferences = null,
+        [Description("Availability requirements the user explicitly stated, e.g. 'ships this week'; when non-empty, out-of-stock candidates are hard-excluded (FR-085)")] IReadOnlyList<string>? availabilityRequirements = null,
         CancellationToken cancellationToken = default) =>
         GetRecommendationsFromRequirementAsync(
             new UserRequirement
@@ -37,6 +38,7 @@ public sealed class ComputeTools(
                 Budget = new Money(budgetAmount, budgetCurrency),
                 RequiredFeatures = requiredFeatures ?? [],
                 Preferences = preferences ?? [],
+                AvailabilityRequirements = availabilityRequirements ?? [],
             },
             cancellationToken);
 

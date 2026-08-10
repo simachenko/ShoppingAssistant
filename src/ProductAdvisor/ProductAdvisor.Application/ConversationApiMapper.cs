@@ -14,7 +14,8 @@ public static class ConversationApiMapper
             result.Message,
             null,
             result.Recommendation!.Items.Select(ToItemResponse).ToList(),
-            result.Recommendation.UnmetConstraintExplanation),
+            result.Recommendation.UnmetConstraintExplanation,
+            NearestAlternatives: result.Recommendation.NearestAlternatives.Select(ToNearestAlternativeResponse).ToList()),
         "comparison" => new ConversationTurnResponse(
             "comparison",
             result.Message,
@@ -33,6 +34,7 @@ public static class ConversationApiMapper
             ProductIds: result.CheckoutLink.ProductIds),
         "answer" => new ConversationTurnResponse("answer", result.Message, null, null, null),
         "unsupported" => new ConversationTurnResponse("unsupported", result.Message, null, null, null),
+        "error" => new ConversationTurnResponse("error", result.Message, null, null, null, Degraded: result.Degraded),
         _ => throw new NotSupportedException($"Unknown turn result type '{result.Type}'."),
     };
 
@@ -64,6 +66,11 @@ public static class ConversationApiMapper
         item.MatchedRequirements,
         item.TradeOffs,
         item.Score);
+
+    private static NearestAlternativeResponse ToNearestAlternativeResponse(NearestAlternative alternative) => new(
+        alternative.Candidate.ProductId,
+        alternative.Candidate.Name,
+        alternative.ViolatedConstraints);
 
     private static ComparisonRowResponse ToRowResponse(ComparisonRow row) => new(
         row.Candidate.ProductId,

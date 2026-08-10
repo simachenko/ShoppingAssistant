@@ -1,5 +1,7 @@
 using Microsoft.Extensions.AI;
 using ProductAdvisor.Application;
+using ProductAdvisor.Application.Pipeline;
+using ProductAdvisor.Infrastructure.ToolRecipes;
 
 namespace ProductAdvisor.Infrastructure.Tools;
 
@@ -42,4 +44,10 @@ public sealed class AdvisorToolCatalog(DataAccessTools dataAccessTools, ComputeT
             "generate_checkout_link",
             "Given one or more product ids the user wants to buy — resolved from their names or from an ordinal/descriptive reference to the most recently shown results — return a checkout link listing exactly those products. Do not construct the link yourself; always call this tool, and if you cannot resolve which products the user means, ask rather than guessing."),
     ];
+
+    public IReadOnlyList<AITool> GetTools(Route route)
+    {
+        var allowed = ToolRecipe.GetAllowedToolNames(route);
+        return [.. GetTools().Where(t => allowed.Contains(t.Name))];
+    }
 }
