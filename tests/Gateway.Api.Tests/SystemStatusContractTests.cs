@@ -46,6 +46,27 @@ public sealed class SystemStatusContractTests
     }
 
     [Fact]
+    public async Task Retries_a_transient_cold_start_response_until_the_service_is_alive()
+    {
+        var catalogAttempts = 0;
+        var factory = new GatewayApiFactory
+        {
+            CatalogResponder = _ => Interlocked.Increment(ref catalogAttempts) == 1
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : new HttpResponseMessage(HttpStatusCode.OK),
+            PricingResponder = _ => new HttpResponseMessage(HttpStatusCode.OK),
+            AdvisorResponder = _ => new HttpResponseMessage(HttpStatusCode.OK),
+        };
+
+        var response = await factory.CreateClient().GetAsync("/api/system-status");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal("ready", body.GetProperty("overall").GetString());
+        Assert.Equal(2, catalogAttempts);
+    }
+
+    [Fact]
     public async Task Reports_degraded_with_200_not_5xx_when_one_dependent_service_is_down()
     {
         var factory = new GatewayApiFactory

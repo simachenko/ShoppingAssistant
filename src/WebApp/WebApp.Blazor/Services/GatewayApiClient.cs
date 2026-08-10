@@ -8,7 +8,7 @@ using WebApp.Blazor.Models;
 
 namespace WebApp.Blazor.Services;
 
-public sealed class GatewayApiClient(HttpClient httpClient)
+public sealed class GatewayApiClient(HttpClient httpClient, CurrentUserTokenProvider tokenProvider)
 {
     // The Gateway's SSE `result` event is hand-serialized (not via Results.Ok(...)'s Web JSON
     // defaults), so it must be read back with the same casing policy or fields silently bind to
@@ -17,8 +17,9 @@ public sealed class GatewayApiClient(HttpClient httpClient)
 
     public async Task<ChatTurnDto> SendMessageAsync(Guid? sessionId, string text, CancellationToken cancellationToken)
     {
-        var response = await httpClient.PostAsJsonAsync(
-            "/api/chat/messages", new { sessionId, text }, cancellationToken);
+        using var request = CreateAuthenticatedRequest(HttpMethod.Post, "/api/chat/messages");
+        request.Content = JsonContent.Create(new { sessionId, text });
+        using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<ChatTurnDto>(cancellationToken);
         return result ?? throw new InvalidOperationException("Gateway returned an empty chat response.");
@@ -36,6 +37,7 @@ public sealed class GatewayApiClient(HttpClient httpClient)
         {
             Content = JsonContent.Create(new { sessionId, text }),
         };
+        AddAuthorization(request);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -74,7 +76,8 @@ public sealed class GatewayApiClient(HttpClient httpClient)
         if (!string.IsNullOrWhiteSpace(sortBy)) queryString.Add($"sortBy={Uri.EscapeDataString(sortBy)}");
 
         var uri = "/api/products/search" + (queryString.Count > 0 ? "?" + string.Join('&', queryString) : "");
-        var response = await httpClient.GetAsync(uri, cancellationToken);
+        using var request = CreateAuthenticatedRequest(HttpMethod.Get, uri);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IReadOnlyList<ProductCandidateDto>>(cancellationToken);
         return result ?? [];
@@ -88,8 +91,9 @@ public sealed class GatewayApiClient(HttpClient httpClient)
     public async Task<ComparisonResultDto> CompareAsync(
         IReadOnlyList<Guid> productIds, CancellationToken cancellationToken)
     {
-        var response = await httpClient.PostAsJsonAsync(
-            "/api/products/compare", new { productIds, includeExplanation = true }, cancellationToken);
+        using var request = CreateAuthenticatedRequest(HttpMethod.Post, "/api/products/compare");
+        request.Content = JsonContent.Create(new { productIds, includeExplanation = true });
+        using var response = await httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<ComparisonResultDto>(cancellationToken);
         return result ?? throw new InvalidOperationException("Gateway returned an empty comparison response.");
@@ -101,7 +105,8 @@ public sealed class GatewayApiClient(HttpClient httpClient)
     /// </summary>
     public async Task<ProductCandidateDto?> GetProductDetailAsync(Guid productId, CancellationToken cancellationToken)
     {
-        var response = await httpClient.GetAsync($"/api/products/{productId}", cancellationToken);
+        using var request = CreateAuthenticatedRequest(HttpMethod.Get, $"/api/products/{productId}");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             return null;
@@ -122,5 +127,19 @@ public sealed class GatewayApiClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<SystemReadinessStatusDto>(cancellationToken);
         return result ?? throw new InvalidOperationException("Gateway returned an empty system-status response.");
+    }
+
+    private HttpRequestMessage CreateAuthenticatedRequest(HttpMethod method, string requestUri)
+    {
+        var request = new HttpRequestMessage(method, requestUri);
+        AddAuthorization(request);
+        return request;
+    }
+
+    private void AddAuthorization(HttpRequestMessage request)
+    {
+        var idToken = tokenProvider.IdToken
+            ?? throw new InvalidOperationException("The signed-in session has no Google id_token.");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", idToken);
     }
 }

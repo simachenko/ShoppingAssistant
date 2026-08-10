@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.HttpOverrides;
 using Polly;
 using WebApp.Blazor.Components;
@@ -35,16 +36,15 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddCascadingAuthenticationState();
 
-builder.Services.AddTransient<BearerTokenHandler>();
-
+builder.Services.AddScoped<CurrentUserTokenProvider>();
 // Add services to the container.
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents();
+    .AddInteractiveServerComponents()
+    .RegisterPersistentService<CurrentUserTokenProvider>(RenderMode.InteractiveServer);
 
 #pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
 builder.Services.AddHttpClient<GatewayApiClient>(client =>
         client.BaseAddress = builder.Configuration.GetServiceBaseAddress("gateway-api"))
-    .AddHttpMessageHandler<BearerTokenHandler>()
     // See the matching comment in Gateway.Api/Program.cs — the SSE streaming call needs a
     // longer, retry-free timeout instead of the standard resilience handler's short-request assumptions.
     .RemoveAllResilienceHandlers()
