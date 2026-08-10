@@ -22,12 +22,21 @@ public sealed class AdvisorApiClient(HttpClient httpClient)
         return body.GetProperty("sessionId").GetGuid();
     }
 
-    public async Task<JsonElement> SendMessageAsync(Guid sessionId, string text, CancellationToken cancellationToken)
+    /// <summary>
+    /// Deliberately does NOT call <c>EnsureSuccessStatusCode()</c> — a controlled rejection from
+    /// Advisor (a `400` guardrail rejection, FR-113; a `409` in-flight-turn conflict, FR-024) is
+    /// a real, meaningful response the caller must relay verbatim, not an exception to collapse
+    /// into a generic `500` (a real gap this fixes: it previously did call
+    /// EnsureSuccessStatusCode, silently turning every Advisor-side `4xx` into an
+    /// undifferentiated Gateway `500` — found by running the Phase 14 eval suite against the
+    /// live stack, which is exactly the kind of defect that smoke test exists to catch).
+    /// </summary>
+    public async Task<(HttpStatusCode StatusCode, JsonElement Body)> SendMessageAsync(Guid sessionId, string text, CancellationToken cancellationToken)
     {
         var response = await httpClient.PostAsJsonAsync(
             $"/api/conversations/{sessionId}/messages", new { text }, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        return (response.StatusCode, body);
     }
 
     /// <summary>

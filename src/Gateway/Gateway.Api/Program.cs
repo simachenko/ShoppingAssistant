@@ -167,7 +167,7 @@ static async Task<ServiceReadiness> CheckServiceAsync(
 
 // POST /api/chat/messages — starts a session if none given, forwards the message, and merges
 // the resolved sessionId into Advisor's (otherwise pass-through) response (contracts/gateway-bff-api.md).
-app.MapPost("/api/chat/messages", async (ChatMessageRequest request, AdvisorApiClient advisor, CancellationToken ct) =>
+app.MapPost("/api/chat/messages", async Task<IResult> (ChatMessageRequest request, AdvisorApiClient advisor, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.Text))
     {
@@ -175,7 +175,15 @@ app.MapPost("/api/chat/messages", async (ChatMessageRequest request, AdvisorApiC
     }
 
     var sessionId = request.SessionId ?? await advisor.CreateSessionAsync(ct);
-    var turn = await advisor.SendMessageAsync(sessionId, request.Text, ct);
+    var (statusCode, turn) = await advisor.SendMessageAsync(sessionId, request.Text, ct);
+
+    if ((int)statusCode >= 300)
+    {
+        // Relay Advisor's own controlled rejection verbatim (400 guardrail rejection, 404
+        // unowned/unknown session, 409 in-flight-turn conflict) — never collapsed into a generic
+        // 500 by assuming every response is a success.
+        return Results.Json(turn, statusCode: (int)statusCode);
+    }
 
     var merged = new Dictionary<string, object?> { ["sessionId"] = sessionId };
     foreach (var property in turn.EnumerateObject())
