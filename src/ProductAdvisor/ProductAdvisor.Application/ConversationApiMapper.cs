@@ -31,6 +31,8 @@ public static class ConversationApiMapper
             null,
             Url: result.CheckoutLink!.Url,
             ProductIds: result.CheckoutLink.ProductIds),
+        "answer" => new ConversationTurnResponse("answer", result.Message, null, null, null),
+        "unsupported" => new ConversationTurnResponse("unsupported", result.Message, null, null, null),
         _ => throw new NotSupportedException($"Unknown turn result type '{result.Type}'."),
     };
 

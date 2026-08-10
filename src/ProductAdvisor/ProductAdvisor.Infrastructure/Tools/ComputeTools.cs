@@ -23,23 +23,39 @@ public sealed class ComputeTools(
 {
     [McpServerTool(Name = "get_recommendations", UseStructuredContent = true)]
     [Description("Given a fully-specified need (category, budget, required features, preferences), return a ranked, deterministically scored set of matching products with pre-computed match reasons and trade-offs — or an explanation of why nothing matches. Do not attempt to filter, rank, or score candidates yourself; always call this tool once category and budget are known.")]
-    public async Task<Recommendation> GetRecommendationsAsync(
+    public Task<Recommendation> GetRecommendationsAsync(
         [Description("Product category, e.g. 'Smartphones'")] string category,
         [Description("Maximum budget amount")] decimal budgetAmount,
         [Description("Budget currency, ISO 4217, e.g. UAH")] string budgetCurrency,
         [Description("Required features/specs, free text, e.g. 'camera_mp'")] IReadOnlyList<string>? requiredFeatures = null,
         [Description("Soft preferences, free text")] IReadOnlyList<string>? preferences = null,
-        CancellationToken cancellationToken = default)
-    {
-        var requirement = new UserRequirement
-        {
-            Category = category,
-            Budget = new Money(budgetAmount, budgetCurrency),
-            RequiredFeatures = requiredFeatures ?? [],
-            Preferences = preferences ?? [],
-        };
+        CancellationToken cancellationToken = default) =>
+        GetRecommendationsFromRequirementAsync(
+            new UserRequirement
+            {
+                Category = category,
+                Budget = new Money(budgetAmount, budgetCurrency),
+                RequiredFeatures = requiredFeatures ?? [],
+                Preferences = preferences ?? [],
+            },
+            cancellationToken);
 
-        var products = await catalogClient.SearchProductsAsync(category, null, cancellationToken);
+    /// <summary>
+    /// The shared computation both the LLM-facing tool above and the deterministic `recommend`
+    /// route (<see cref="ProductAdvisor.Application.Pipeline.IRecommendationService"/>, spec.md
+    /// FR-066) call — never two independent implementations of the same recommendation logic.
+    /// </summary>
+    public async Task<Recommendation> GetRecommendationsFromRequirementAsync(
+        UserRequirement requirement, CancellationToken cancellationToken = default)
+    {
+        if (!requirement.HasEssentialInformation)
+        {
+            throw new ArgumentException(
+                "Category and Budget must both be known before a recommendation can be computed.",
+                nameof(requirement));
+        }
+
+        var products = await catalogClient.SearchProductsAsync(requirement.Category!, null, cancellationToken);
 
         var offers = products.Count == 0
             ? new PricingBatchResponse([], [])

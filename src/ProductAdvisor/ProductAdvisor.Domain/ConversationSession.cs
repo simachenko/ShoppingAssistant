@@ -67,6 +67,21 @@ public sealed class ConversationSession
         State = ConversationState.Collecting;
     }
 
+    /// <summary>
+    /// Deterministic, field-level merge of a schema-valid <see cref="RequirementPatch"/> into
+    /// <see cref="CurrentRequirement"/> (spec.md FR-056–FR-059) — the state-merge stage's own
+    /// operation, distinct from <see cref="UpdateRequirement"/>'s wholesale replace. Also drops
+    /// back to Collecting, consistent with FR-011: a changed constraint supersedes any prior
+    /// recommendation rather than silently merging with it.
+    /// </summary>
+    public void MergeRequirement(RequirementPatch patch)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        CurrentRequirement = CurrentRequirement.Merge(patch);
+        PendingClarification = null;
+        State = ConversationState.Collecting;
+    }
+
     public void AskClarification(ClarificationQuestion question)
     {
         ArgumentNullException.ThrowIfNull(question);

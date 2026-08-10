@@ -1,13 +1,16 @@
+using ProductAdvisor.Application.Pipeline;
 using ProductAdvisor.Domain;
 using Xunit;
 
 namespace ProductAdvisor.Application.Tests;
 
 /// <summary>
-/// Proves the conversation orchestration loop only ever relays what a tool already computed
-/// (captured via <see cref="IToolResultCapture"/>) or what the LLM said in plain text — it never
-/// invokes ScoringPolicy, never builds a Recommendation itself, and never invents a fact
-/// (research.md §1, plan.md Summary).
+/// Proves the conversation orchestration loop only ever relays what a tool/service already
+/// computed — it never invokes ScoringPolicy, never builds a Recommendation itself, and never
+/// invents a fact (research.md §1, plan.md Summary). Updated for the deterministic
+/// turn-processing cycle (spec.md FR-036–FR-059, research.md §20): the `recommend` route now
+/// calls <see cref="IRecommendationService"/> directly with the deterministically-merged
+/// requirement, rather than trusting whatever a free-form tool call happened to capture.
 /// </summary>
 public class OrchestrationNeverComputesTests
 {
@@ -20,10 +23,9 @@ public class OrchestrationNeverComputesTests
     };
 
     [Fact]
-    public async Task When_a_tool_already_captured_a_recommendation_the_orchestrator_relays_it_verbatim()
+    public async Task A_recommend_route_relays_the_service_result_verbatim_never_recomputing_it()
     {
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
-        var requirementUsed = new UserRequirement { Category = "smartphones", Budget = new Money(15000m, "UAH") };
         var expectedRecommendation = new Recommendation
         {
             RecommendationId = Guid.NewGuid(),
@@ -39,11 +41,13 @@ public class OrchestrationNeverComputesTests
             ],
         };
 
-        var capture = new ToolResultCapture();
-        capture.SetRecommendation(expectedRecommendation, requirementUsed);
-
+        var chatClient = new FakeChatClient(
+            ExtractionJson.Recommend("smartphones", 15000m, "UAH"),
+            "Here's a smartphone that fits your budget.");
+        var recommendationService = new FakeRecommendationService(expectedRecommendation);
         var orchestrator = new ConversationOrchestrator(
-            new FakeChatClient("Here's a smartphone that fits your budget."), new FakeToolCatalog(), capture);
+            chatClient, new FakeToolCatalog(), new ToolResultCapture(),
+            new ExtractionStage(chatClient), recommendationService);
 
         var result = await orchestrator.ProcessMessageAsync(session, "I need a smartphone under 15000 UAH", CancellationToken.None);
 
@@ -51,37 +55,48 @@ public class OrchestrationNeverComputesTests
         // Same instance, not a recomputed one — the orchestrator never called ScoringPolicy.
         Assert.Same(expectedRecommendation, result.Recommendation);
         Assert.Equal(ConversationState.Recommending, session.State);
-        Assert.Equal(requirementUsed, session.CurrentRequirement);
+        Assert.Equal("smartphones", session.CurrentRequirement.Category);
+        Assert.Equal(new Money(15000m, "UAH"), session.CurrentRequirement.Budget);
+        // The deterministic compute step read the already-merged requirement, never an argument
+        // the language model reconstructed itself (FR-066).
+        Assert.Same(session.CurrentRequirement, recommendationService.LastRequirement);
     }
 
     [Fact]
-    public async Task When_no_tool_captured_anything_the_orchestrator_treats_the_LLM_text_as_a_clarification()
+    public async Task An_extraction_result_the_router_sends_to_Clarify_never_reaches_the_recommendation_service()
     {
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
-        var capture = new ToolResultCapture();
-
+        var chatClient = new FakeChatClient(ExtractionJson.RequirementPatchOnly(category: "laptops", missingFields: ["Budget"]));
+        var recommendationService = new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] });
         var orchestrator = new ConversationOrchestrator(
-            new FakeChatClient("What's your budget for this laptop?"), new FakeToolCatalog(), capture);
+            chatClient, new FakeToolCatalog(), new ToolResultCapture(),
+            new ExtractionStage(chatClient), recommendationService);
 
         var result = await orchestrator.ProcessMessageAsync(session, "I need a good laptop", CancellationToken.None);
 
         Assert.Equal("clarification", result.Type);
-        Assert.Equal("What's your budget for this laptop?", result.Question);
         Assert.Null(result.Recommendation);
         Assert.Equal(ConversationState.Collecting, session.State);
         Assert.NotNull(session.PendingClarification);
+        Assert.Equal(0, recommendationService.CallCount);
+        // The partial patch (category) still merged even though the turn overall clarifies.
+        Assert.Equal("laptops", session.CurrentRequirement.Category);
     }
 
     [Fact]
-    public async Task The_orchestrator_passes_the_full_tool_catalog_to_the_chat_client_every_turn()
+    public async Task A_smalltalk_turn_never_calls_the_recommendation_service_and_carries_no_product_data()
     {
         var session = new ConversationSession(Guid.NewGuid(), "test-user");
-        var chatClient = new FakeChatClient("ok");
-        var orchestrator = new ConversationOrchestrator(chatClient, new FakeToolCatalog(), new ToolResultCapture());
+        var chatClient = new FakeChatClient(ExtractionJson.Smalltalk(), "Hi there! How can I help you shop today?");
+        var recommendationService = new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] });
+        var orchestrator = new ConversationOrchestrator(
+            chatClient, new FakeToolCatalog(), new ToolResultCapture(),
+            new ExtractionStage(chatClient), recommendationService);
 
-        await orchestrator.ProcessMessageAsync(session, "hello", CancellationToken.None);
+        var result = await orchestrator.ProcessMessageAsync(session, "hello", CancellationToken.None);
 
-        Assert.NotNull(chatClient.LastOptions);
-        Assert.NotNull(chatClient.LastOptions!.Tools);
+        Assert.Equal("answer", result.Type);
+        Assert.Null(result.Recommendation);
+        Assert.Equal(0, recommendationService.CallCount);
     }
 }

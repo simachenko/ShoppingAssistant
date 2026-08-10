@@ -27,4 +27,21 @@ public sealed record AdvisorTurnResult
 
     public static AdvisorTurnResult ForCheckoutLink(string message, CheckoutLink checkoutLink) =>
         new() { Type = "checkoutLink", Message = message, CheckoutLink = checkoutLink };
+
+    /// <summary>
+    /// A plain conversational reply with no product data attached (`smalltalk`-intent turns,
+    /// spec.md FR-060/FR-063) — a first-class result type, not a `clarification` in disguise.
+    /// Phase 10 (spec.md FR-060–FR-065) will fold this into the full seven-type discriminated
+    /// `TurnResult` contract; this minimal variant only unblocks correct routing for now.
+    /// </summary>
+    public static AdvisorTurnResult ForAnswer(string message) =>
+        new() { Type = "answer", Message = message };
+
+    /// <summary>
+    /// A recognized but out-of-scope request (`unsupported`-intent turns, spec.md FR-064) —
+    /// never remapped to `clarification` (which implies more information would help) or silently
+    /// dropped.
+    /// </summary>
+    public static AdvisorTurnResult ForUnsupported(string message) =>
+        new() { Type = "unsupported", Message = message };
 }

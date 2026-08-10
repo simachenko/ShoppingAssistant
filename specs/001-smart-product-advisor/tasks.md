@@ -810,6 +810,432 @@ time real usage begins.
 
 ---
 
+## Phase 9: Deterministic Turn-Processing Cycle Foundation (FR-036–FR-059)
+
+> **Numbering note**: continues task IDs from T124 (highest previously used: T123). A
+> `/speckit-analyze` consistency review found that FR-036 through FR-141 — the entire
+> deterministic turn-processing cycle, structured intent extraction, deterministic state
+> management, turn result types, tool recipes, resource budgets, the Evidence Envelope, system
+> prompts, request guardrails, privacy-by-design, credential hardening, observability policy,
+> and the eval suite — had zero task coverage; the built system still runs the free
+> `FunctionInvokingChatClient` tool-selection loop the spec explicitly documents as superseded
+> (spec.md Assumptions, research.md §20). Phases 9–14 close that gap. See spec.md's "System
+> Requirement" cross-cutting sections and research.md §20–§33 for the requirements and design
+> these phases implement.
+
+**Goal**: Replace `ConversationOrchestrator`'s free tool-selection loop with the fixed,
+application-controlled ten-stage cycle (input validation → structured intent extraction →
+schema validation → deterministic state merge → policy routing → intent-specific tool recipe →
+tool-result validation → constrained narration → output validation → persistence), with
+structured-intent-extraction's closed schema/one-repair-attempt contract and `CurrentRequirement`
+as the sole authoritative, field-level-merged source of the user's requirement.
+
+**Independent Test**: Send a message that partially updates a previously-established requirement
+(e.g., only a budget change) and confirm every other field (category, required features,
+language) persists unchanged; send a message that fails schema validation on its first
+extraction attempt (simulated via a stubbed malformed LLM response) and confirm exactly one
+repair attempt occurs before falling back to clarification.
+
+### Tests for This Phase
+
+- [X] T124 [P] Unit tests for `StructuredIntent` schema validation — required fields present;
+      `Intent` restricted to the closed six-value set; a value outside it is a schema failure,
+      never a new route — in `tests/ProductAdvisor.Domain.Tests/StructuredIntentValidationTests.cs`
+      (FR-048/FR-049). Verified: 3/3 passing.
+- [X] T125 [P] Unit tests for deterministic state-merge — a partial patch persists every
+      previously-known field; an explicit empty list clears a list field; an absent field never
+      clears; a budget/category change replaces only that field — in
+      `tests/ProductAdvisor.Domain.Tests/StateMergeTests.cs` (FR-057/FR-058). Verified: 7/7 passing.
+- [X] T126 [P] Application-layer tests for the extraction stage — a schema-valid result passes
+      through; a schema-invalid result triggers exactly one repair attempt; a second failure
+      falls back to `clarification`, never a third attempt — in
+      `tests/ProductAdvisor.Application.Tests/ExtractionStageTests.cs` (FR-050/FR-051). Verified:
+      5/5 passing, via a `FakeChatClient` that queues per-call canned responses (extraction, then
+      narration) rather than one fixed response for every call — the pre-existing fake only ever
+      needed to answer one call per turn before this phase.
+- [X] T127 [P] Unit tests for `PolicyRouter` — two turns with identical merged state select the
+      identical route (determinism); missing essential fields route to `clarification` — in
+      `tests/ProductAdvisor.Application.Tests/PolicyRouterTests.cs` (FR-041, SC-026). Verified:
+      7/7 passing.
+- [X] T128 Application-layer test asserting a turn executes all ten cycle stages in fixed order,
+      exactly once, with no stage skipped/reordered/repeated, in
+      `tests/ProductAdvisor.Application.Tests/TurnProcessingCycleTests.cs` (FR-036, SC-022).
+      Verified: 3/3 passing. Scoped honestly to what this phase actually implements — stages
+      1–5 (input validation, extraction, schema validation, state merge, policy routing) are
+      fully deterministic and asserted here; stages 6–10 (tool recipe scoping, tool-result
+      validation, the Evidence Envelope, output validation) are Phase 10/11 work — this phase's
+      `recommend` route already reaches its terminal compute call deterministically, while
+      `compare`/`checkout`/`product_fact` still bridge through the pre-existing free
+      tool-invocation mechanism pending Phase 10's tool-recipe scoping (see T134's note).
+
+### Implementation for This Phase
+
+- [X] T129 [P] Define the `StructuredIntent` DTO (`Intent` enum, `RequirementPatch`,
+      `ProductReferences`, `MissingFields`, `Confidence`, `Language`) per data-model.md, in
+      `src/ProductAdvisor/ProductAdvisor.Domain/StructuredIntent.cs` (depends on T124). The
+      `Intent` enum is decorated with `[JsonStringEnumMemberName("product_fact")]` so the wire
+      value matches spec.md's literal `product_fact` rather than the naming-policy-transformed
+      default (`productFact`) — found via a real deserialization failure while verifying T126
+      (see Errors and fixes below).
+- [X] T130 Extend `UserRequirement` (T012) with the field-level merge rule (present replaces,
+      absent carries forward, explicit-empty-list clears) and the `Units`/`AvailabilityRequirements`
+      fields from data-model.md, in `src/ProductAdvisor/ProductAdvisor.Domain/UserRequirement.cs`
+      (depends on T125). Also added `ConversationSession.MergeRequirement(RequirementPatch)` —
+      the new field-level operation, distinct from the pre-existing `UpdateRequirement`'s
+      wholesale replace, which remains for the cases (e.g. direct test setup) that still want it.
+- [X] T131 Implement the structured-intent-extraction system prompt — schema-first output,
+      `CurrentRequirement` included verbatim, user input marked as untrusted data, no
+      chain-of-thought requested, versioned (`ExtractionStage.PromptVersion`) — in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/ExtractionStage.cs` (depends on
+      T129). **Deviates from the planned file path**: kept in `ProductAdvisor.Application`
+      alongside `ExtractionStage` rather than a new `ProductAdvisor.Infrastructure/Prompts/`
+      folder — matches this codebase's existing convention (the pre-existing narration system
+      prompt was already inline in `ConversationOrchestrator`, in Application, not Infrastructure)
+      rather than introducing a new layering pattern for this phase alone.
+- [X] T132 Implement the extraction pipeline stage — one LLM call constrained to the
+      `StructuredIntent` schema via `IChatClient.GetResponseAsync<T>` (schema-first structured
+      output, FR-094), at most one repair attempt on validation failure, fallback to `null`
+      (the orchestrator's signal for `clarification`) on a second failure — in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/ExtractionStage.cs` (depends on
+      T126, T131).
+- [X] T133 Implement `PolicyRouter` — deterministic route selection (`Recommend`/`Compare`/
+      `Checkout`/`ProductFact`/`Smalltalk`/`Unsupported`/`Clarify`) from merged
+      `CurrentRequirement` + `StructuredIntent`, as pure application-layer code, never a model
+      choice — in `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/PolicyRouter.cs`
+      (depends on T127, T130).
+- [X] T134 Rewrite `ConversationOrchestrator` (T040) to run stages 1–5 of the cycle deterministically,
+      then dispatch by route — in
+      `src/ProductAdvisor/ProductAdvisor.Application/ConversationOrchestrator.cs` (depends on
+      T128, T132, T133). Added `IRecommendationService` (+ its Infrastructure adapter
+      `RecommendationService`, wrapping the same `ComputeTools.GetRecommendationsFromRequirementAsync`
+      the LLM-facing `get_recommendations` tool now also delegates to — one implementation, not
+      two) so the `recommend` route calls the deterministic compute step directly from the
+      already-merged `CurrentRequirement`, never from arguments the model reconstructs itself
+      (FR-066). `compare`/`checkout`/`product_fact` still run through the pre-existing free
+      tool-invocation loop as an explicit, temporary bridge to Phase 10's tool-recipe scoping —
+      but now correctly typed: a `product_fact` turn that resolves to nothing captured now
+      produces `answer` (added `AdvisorTurnResult.ForAnswer`/`ForUnsupported`, and
+      `ConversationApiMapper` cases for both), never the pre-cycle behavior of silently
+      defaulting to `clarification` — a real bug this phase fixed (FR-062/FR-063), not merely
+      refactored around. `smalltalk`/`unsupported` are now correctly classified and answered
+      instead of following the old code's only fallback (asking a clarifying question, wrong for
+      a greeting or an out-of-scope request).
+
+**Verification**: `dotnet build` — 0 errors, 0 new warnings (same pre-existing NU1902/MSB3277
+warnings as before this phase). `ProductAdvisor.Domain.Tests`: 49/49 passing.
+`ProductAdvisor.Application.Tests`: 24/24 passing (including 3 pre-existing test files rewritten
+for the new pipeline — `OrchestrationNeverComputesTests`, `NotFoundHonestyTests`,
+`FollowUpQuestionTests` — their invariants still hold, their setup now reflects the two-call
+extraction+narration shape instead of one free-form call). `ProductAdvisor.Api.Tests` and
+`EndToEnd.Tests` were **not** run — both require Docker/Testcontainers, unavailable in this
+sandbox (the same limitation T026/T044/T118 already documented); `dotnet build` confirms they
+still compile against the new constructor signature, but their contract/end-to-end assertions
+against a live docker-compose stack are unverified here.
+
+**Checkpoint**: The conversation loop's classification and state-management stages are a fixed,
+application-controlled pipeline rather than free-form reconstruction from history; `recommend`'s
+compute step is fully deterministic; `CurrentRequirement` is deterministically and correctly
+maintained across turns via field-level merge. Phases 10–14 build the remaining pipeline stages
+(tool-recipe scoping for `compare`/`checkout`/`product_fact`, resource budgets, the Evidence
+Envelope, guardrails, privacy, credential hardening, observability, and the eval suite) on top of
+this foundation.
+
+---
+
+## Phase 10: Turn Result Types, Tool Recipes & Resource Budgets (FR-060–FR-085)
+
+**Goal**: Every turn resolves to exactly one of seven discriminated result types, never
+defaulting to `clarification`; each route's tool recipe is fixed and minimal with a scoped
+tool-exposure surface; a `TurnResourceBudget` enforces hard limits on LLM/tool calls, loop
+iterations, consecutive errors, and overall timeout; recommendations precisely separate hard
+constraints (disqualifying) from soft preferences (ranking-only), with nearest alternatives
+labeled by violated constraint.
+
+**Independent Test**: Ask a targeted product-fact question and confirm the response is typed
+`answer`, not `clarification`; request a recommendation with an over-budget candidate present in
+seed data and confirm it never appears in `items` but may appear in `nearestAlternatives` labeled
+with the violated constraint; force a tool-call count past a low test-configured maximum and
+confirm the turn ends in `error` with zero further tool calls.
+
+### Tests for This Phase
+
+- [ ] T135 [P] Unit tests for `TurnResult` type assignment — absence of `recommendation`/
+      `comparison`/`checkoutLink` never defaults to `clarification`; `product_fact` with a
+      validated tool result → `answer`; `unsupported` intent → `unsupported`; a tool-result
+      validation failure → `error` — in `tests/ProductAdvisor.Application.Tests/TurnResultTypeTests.cs`
+      (FR-060–FR-065).
+- [ ] T136 [P] Contract tests for tool-exposure scoping — a `recommend`-route turn's tool-list
+      surface never includes `compare_products`/`generate_checkout_link`; `smalltalk`/
+      `unsupported` make zero tool calls; a `product_fact` turn calls only the tool(s) its
+      specific fact needs — in `tests/ProductAdvisor.Api.Tests/ToolRecipeScopingTests.cs`
+      (FR-066–FR-070).
+- [ ] T137 [P] Tests for each `TurnResourceBudget` limit's fail-safe (max tool calls, max
+      consecutive tool errors, max loop iterations, overall timeout each → `error`, never a
+      partial success or an infinite loop) in
+      `tests/ProductAdvisor.Application.Tests/TurnResourceBudgetTests.cs` (FR-071–FR-079).
+- [ ] T138 [P] Unit tests for hard-constraint filtering — an over-budget, currency-mismatched,
+      missing-required-feature, or (when explicitly stated) out-of-stock candidate is excluded
+      from `Items`; a soft-preference-only mismatch never excludes a candidate;
+      `NearestAlternatives` never appears alongside a non-empty `Items` — in
+      `tests/ProductAdvisor.Domain.Tests/ScoringPolicyHardConstraintTests.cs` (FR-080–FR-085).
+
+### Implementation for This Phase
+
+- [ ] T139 [P] Add the `TurnResult` discriminated shape (`answer`/`clarification`/
+      `recommendation`/`comparison`/`checkoutLink`/`unsupported`/`error`) per data-model.md,
+      replacing the current four-shape response mapper, in
+      `src/ProductAdvisor/ProductAdvisor.Application/TurnResult.cs` (depends on T135).
+- [ ] T140 Implement per-route `ToolRecipe` scoping — the tool-list surface presented for a turn
+      (whatever invokes it) is limited to exactly that route's recipe before any language-model
+      call — in `src/ProductAdvisor/ProductAdvisor.Infrastructure/ToolRecipes/` (depends on
+      T133, T136).
+- [ ] T141 Implement `TurnResourceBudget` enforcement — max primary LLM calls (2 + 1 repair), max
+      tool calls, max consecutive tool errors, max loop iterations, overall turn timeout,
+      cancellation-on-disconnect releasing the FR-024 in-flight marker, non-idempotent-operation
+      exclusion from automatic retry — in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/TurnResourceBudgetGuard.cs`
+      (depends on T134, T137).
+- [ ] T142 Extend `ScoringPolicy` (T035) to a two-phase hard-constraint filter (budget as
+      ceiling, required features, explicit availability requirement, currency compatibility) +
+      soft-preference rank, producing `NearestAlternative` entries with `ViolatedConstraints` for
+      excluded candidates, in `src/ProductAdvisor/ProductAdvisor.Domain/ScoringPolicy.cs`
+      (depends on T138).
+- [ ] T143 Extend the `get_recommendations` MCP tool's input (`availabilityRequirements`) and
+      output (`nearestAlternatives`) per contracts/advisor-mcp-tools.md, in
+      `src/ProductAdvisor/ProductAdvisor.Infrastructure/Tools/ComputeTools.cs` (depends on T142;
+      extends T038).
+
+**Checkpoint**: Every turn's outcome is precisely typed and traceable to policy + tool outcome
+alone; no turn can run away on tool calls or loop iterations; recommendations never silently
+include a disqualified product.
+
+---
+
+## Phase 11: Evidence Envelope & System Prompts (FR-086–FR-103)
+
+**Goal**: Narration receives only a deterministically-assembled Evidence Envelope — never raw
+tool output or the raw user message — and is never the source of a price, specification,
+availability, score, rating, delta, or checkout URL; output validation rejects/strips/replaces
+any narration claim the Envelope doesn't back, without ever touching the turn's structured data;
+both system prompts are versioned, section-separated, and schema-first (extraction).
+
+**Independent Test**: Stub a narration response that states a price not present in the tool
+result and confirm the delivered `message` never contains that value while `items`/`type` stay
+identical to the grounded case; confirm zero additional LLM calls are made to produce the
+fallback narration.
+
+### Tests for This Phase
+
+- [ ] T144 [P] Unit tests for `EvidenceEnvelope` assembly — every `CanonicalData` field has a
+      `VerificationStatus`/`Provenance` entry; the envelope is empty for `smalltalk`/
+      `unsupported`; assembly is deterministic across identical tool results — in
+      `tests/ProductAdvisor.Application.Tests/EvidenceEnvelopeTests.cs` (FR-086/FR-091/FR-092).
+- [ ] T145 [P] Contract tests for narration grounding — a stubbed ungrounded claim (price, spec,
+      availability, score, rating, delta, or checkout URL not in the Envelope) is rejected/
+      stripped/replaced while `items`/`criteria`/`rows`/`fact`/`url` and `type` remain
+      byte-identical to the grounded case; the fallback triggers zero additional LLM calls — in
+      `tests/ProductAdvisor.Api.Tests/NarrationGroundingTests.cs` (FR-088–FR-090).
+
+### Implementation for This Phase
+
+- [ ] T146 Implement `EvidenceEnvelope` assembly from validated tool results — result type,
+      canonical structured data, verification status, tool provenance, unverified/unavailable
+      fields, tool execution status, allowed-claims whitelist — entirely by deterministic
+      application code, in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/EvidenceEnvelopeBuilder.cs`
+      (depends on T134, T144).
+- [ ] T147 Implement the constrained-narration system prompt — receives only the Evidence
+      Envelope, instructed to summarize salient points rather than restate every value, no
+      simultaneous brevity-and-exhaustive-restatement conflict, language/anti-disclosure/
+      no-chain-of-thought instructions, versioned — in
+      `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/NarrationPrompt.cs` (depends on
+      T146).
+- [ ] T148 Implement output validation's grounding check — every numeric/factual narration claim
+      checked against the Envelope's allowed claims; reject/strip/replace with a deterministic
+      (non-LLM) fallback on an ungrounded claim; never alters `TurnResult`'s structured fields or
+      type — in `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/OutputValidationStage.cs`
+      (depends on T145, T147).
+- [ ] T149 Add runtime-observable version identifiers to both prompts (T131, T147), logged with
+      every call, in `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/`.
+
+**Checkpoint**: Narration can never introduce an unverified fact into a delivered response, and
+the structured UI is always correct independent of narration's fate.
+
+---
+
+## Phase 12: Request Guardrails & Privacy-by-Design (FR-104–FR-123)
+
+**Goal**: Oversized/malformed/dangerous input is rejected before any LLM/tool call; per-user
+rate/concurrency/quota limits are enforced; potential PII is blocked or redacted before reaching
+the LLM provider; prompts never carry the user's stable identifier; users can delete their own
+history and old sessions are deleted automatically; encryption and LLM-provider data-handling
+requirements are confirmed.
+
+**Independent Test**: Submit a message exceeding the configured max length and confirm a `400`
+with zero LLM/tool calls; submit a message containing an obvious PII pattern (e.g., an email
+address) and confirm it never reaches the extraction call verbatim; delete a session and confirm
+a subsequent `GET` returns `404`.
+
+### Tests for This Phase
+
+- [ ] T150 [P] Contract tests for input guardrails — oversized message (`400`), oversized body
+      (`413`), dangerous control characters (`400`), oversized hard-constraint/preference lists
+      (`400`) — each with zero LLM/tool calls made — in
+      `tests/ProductAdvisor.Api.Tests/InputGuardrailTests.cs` (FR-104–FR-107/FR-113).
+- [ ] T151 [P] Contract tests for strict value validation — an invalid currency/operator/unit/
+      product-id in extraction output routes to `clarification`, never a tool call — in
+      `tests/ProductAdvisor.Api.Tests/StrictValueValidationTests.cs` (FR-108).
+- [ ] T152 [P] Contract tests for rate/concurrency/quota limits — `429` with zero LLM/tool calls
+      once a per-user limit is exceeded — in `tests/Gateway.Api.Tests/RateLimitAndQuotaTests.cs`
+      (FR-109–FR-111).
+- [ ] T153 [P] Contract tests for PII screening — a PII fixture never reaches the extraction call
+      verbatim (`Blocked` → `400`, or `Redacted` → only `RedactedText` is sent) — in
+      `tests/ProductAdvisor.Api.Tests/PiiScreeningTests.cs` (FR-116).
+- [ ] T154 [P] Contract tests for user-initiated deletion — subsequent `GET`/`POST` returns `404`
+      after deletion; `409` while a turn is in flight — in
+      `tests/ProductAdvisor.Api.Tests/ConversationDeletionTests.cs` (FR-119).
+
+### Implementation for This Phase
+
+- [ ] T155 [P] Implement input-validation-stage guardrails — max message length, Unicode
+      normalization, control-character rejection, max active conversation context size (bounds
+      prompt inclusion only, never persistence) — in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/InputValidationStage.cs` (depends
+      on T134, T150).
+- [ ] T156 [P] Implement max request body size (`413`) at the HTTP layer before parsing, in
+      `src/Gateway/Gateway.Api/` + `src/ProductAdvisor/ProductAdvisor.Api/` (depends on T150).
+- [ ] T157 Implement max count/per-entry length for `RequiredFeatures`/`Preferences`/
+      `AvailabilityRequirements`, enforced cumulatively at state-merge time (not just per-patch),
+      in `src/ProductAdvisor/ProductAdvisor.Domain/UserRequirement.cs` (extends T130).
+- [ ] T158 Implement strict value validation (ISO 4217 currency, non-negative budget, closed
+      operator set, known units, catalog-format product ids) before any tool call, routing a
+      failure to `clarification`, in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/ValueValidationStage.cs` (depends
+      on T133, T151).
+- [ ] T159 Implement per-user rate limiting and a per-user cross-session concurrency limit
+      (distinct from and layered on FR-024's per-session lock), keyed on the authenticated user
+      identifier, in `src/Gateway/Gateway.Api/` + `src/ProductAdvisor/ProductAdvisor.Api/`
+      (depends on T112, T152).
+- [ ] T160 Implement a per-user token/cost quota tracked cumulatively over a configured window,
+      in `src/ProductAdvisor/ProductAdvisor.Application/` (depends on T141, T152).
+- [ ] T161 Implement PII screening as a pipeline stage producing `PiiScreeningResult` (block or
+      redact before any LLM call), in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/PiiScreeningStage.cs` (depends on
+      T134, T153).
+- [ ] T162 Exclude `ConversationSession.UserId` from both prompts' assembled content; audit T131/
+      T147 for compliance, in `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/`
+      (depends on T131, T147, T161).
+- [ ] T163 Implement `DELETE /api/conversations/{sessionId}` and `DELETE /api/conversations`
+      (user-initiated deletion) in `src/ProductAdvisor/ProductAdvisor.Api/` + a Gateway
+      pass-through in `src/Gateway/Gateway.Api/` (depends on T041, T154).
+- [ ] T164 Implement automatic retention-based session deletion (a scheduled/background job),
+      independent of user-initiated deletion, in
+      `src/ProductAdvisor/ProductAdvisor.Infrastructure/` (depends on T018).
+- [ ] T165 Confirm and document TLS for every in-transit hop (browser↔system, internal
+      service-to-service, system↔LLM provider) and at-rest + backup encryption for the Postgres
+      store (Neon/Render already provide these — verify and document the configuration, don't
+      assume) in `README.md`.
+- [ ] T166 Confirm the configured LLM provider's training/retention/data-region policy satisfies
+      FR-123; document the finding in `research.md`/`README.md`.
+
+**Checkpoint**: No oversized, malformed, dangerous, rate-exceeding, or PII-bearing input reaches
+the LLM or a tool; users control their own data; encryption and provider requirements are
+confirmed, not assumed.
+
+---
+
+## Phase 13: MCP/Credential Security Hardening & Safe Observability (FR-124–FR-137)
+
+**Goal**: `InternalApiKey` validation is constant-time and never accepts a development default in
+production, with documented rotation support; a valid internal credential never grants MCP
+callers conversation ownership on its own; the MCP SDK preview dependency has a documented
+production-readiness review; logs carry only the allowed eleven fields (never the seven denied
+ones); seven dedicated metrics cover the turn cycle's key failure/decision modes.
+
+**Independent Test**: Run a timing benchmark comparing credential-validation duration for a
+completely-wrong value versus one matching every character but the last and confirm no
+statistically significant difference; confirm a request authenticated with the local-development
+`InternalApiKey` value is rejected when the service is configured for Production.
+
+### Tests for This Phase
+
+- [ ] T167 [P] Tests for credential hardening — an unset `InternalApiKey` refuses every caller;
+      the local-development placeholder value is refused in a Production configuration; a timing
+      benchmark shows no correlation between comparison duration and match length — in
+      `tests/ProductAdvisor.Api.Tests/InternalCredentialSecurityTests.cs` (FR-124/FR-127/FR-128).
+- [ ] T168 [P] Test proving a valid `X-Internal-Api-Key` plus an arbitrary `X-User-Id` on `/mcp`
+      is still rejected by the FR-031 ownership check — the internal key alone never grants
+      session access — in `tests/ProductAdvisor.Api.Tests/McpOwnershipIndependenceTests.cs`
+      (FR-131).
+- [ ] T169 [P] Tests for the observability allow/deny policy — sampled logs never contain a
+      denied field (full message, full prompt, PII-bearing tool data, Authorization headers, API
+      keys, connection strings, full LLM response); each of the seven dedicated metrics
+      increments independently for its triggering event — in
+      `tests/ProductAdvisor.Application.Tests/ObservabilityPolicyTests.cs` (FR-133–FR-137).
+
+### Implementation for This Phase
+
+- [ ] T170 Replace `InternalApiKeyMiddleware`'s (T108) credential comparison with a constant-time
+      comparison, in `src/Aspire/ServiceDefaults/InternalAuth/InternalApiKeyMiddleware.cs`
+      (depends on T167).
+- [ ] T171 Add a production-configuration guard that refuses every caller when `InternalApiKey`
+      is unset and rejects a known local-development placeholder value when running in a
+      Production environment, in `src/Aspire/ServiceDefaults/InternalAuth/` (depends on T170).
+- [ ] T172 Document and implement rotation support (an old/new value overlap window) for
+      `InternalApiKey`, in `src/Aspire/ServiceDefaults/InternalAuth/` (depends on T170).
+- [ ] T173 Record a documented production-readiness review for the `ModelContextProtocol`/
+      `ModelContextProtocol.AspNetCore` preview package (or upgrade past preview if one is
+      available) in a new `docs/dependency-reviews.md`.
+- [ ] T174 Implement a structured-logging helper restricted to the eleven allowed fields
+      (correlation id, hashed/pseudonymous identifier, prompt version, model identifier, intent,
+      tool name, allow/deny decision, latency, token usage, validation status, error category)
+      and a hashed/pseudonymous identifier helper (irreversible from the logged value alone), in
+      `src/Aspire/ServiceDefaults/Observability/` (depends on T169).
+- [ ] T175 Add the seven dedicated metrics (loop-limit reached, schema-repair attempted, rejected
+      tool call, grounding failure, rate-limit rejection, PII detection, provider failure) at
+      their respective pipeline stages, in
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/` (depends on T141, T148, T159,
+      T161, T174).
+
+**Checkpoint**: Credential handling resists timing attacks and dev-default misuse in production;
+an MCP caller can never impersonate conversation ownership from the internal key alone; logs and
+metrics give full turn-cycle visibility without ever leaking sensitive content.
+
+---
+
+## Phase 14: Agentic Security and Quality Eval Suite (FR-138–FR-141)
+
+**Goal**: An automated eval suite covers all fifteen mandatory classes; the six grounding/
+authorization/cross-session-access classes gate CI at a 100% pass rate; the remaining nine run
+automatically and are reviewed at release without a fixed pass-rate requirement.
+
+**Independent Test**: Run the eval suite locally; confirm all fifteen classes execute and report;
+confirm CI fails the build if a critical-class eval is made to fail (verified by temporarily
+breaking one deliberately), and does not fail the build for a non-critical-class failure.
+
+### Tasks
+
+- [ ] T176 [P] Author evals for the six critical classes — indirect injection via product/spec,
+      fabricated prices/specs/availability, product not found (grounding); wrong tool for intent,
+      system-prompt extraction attempt (authorization); cross-session access — in
+      `tests/EndToEnd.Tests/Evals/CriticalEvals.cs` (depends on Phases 9–13; FR-138–FR-140).
+- [ ] T177 [P] Author evals for the nine non-critical classes — direct prompt injection,
+      tool-loop exhaustion, malformed tool arguments, oversized input, memory poisoning,
+      constraint changes between turns, partial dependency failure, unsupported intent,
+      PII/payment-data input — in `tests/EndToEnd.Tests/Evals/NonCriticalEvals.cs` (depends on
+      Phases 9–13; FR-138/FR-141).
+- [ ] T178 Wire the eval suite into `.github/workflows/ci.yml` as a distinct job — failing the
+      build on any critical-class (T176) failure, reporting but not failing the build on a
+      non-critical-class (T177) failure — in `.github/workflows/ci.yml` (depends on T176, T177).
+- [ ] T179 Document the critical/non-critical categorization and its rationale in `README.md`,
+      cross-referencing spec.md's Assumptions and research.md §33 (depends on T178).
+
+**Checkpoint**: Every guarantee this specification makes about prompt injection, grounding,
+authorization, cross-session isolation, resource exhaustion, and PII handling is verified by an
+automated, CI-gated eval, not merely documented.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -846,6 +1272,26 @@ time real usage begins.
   specifically — `GET /api/system-status` is deliberately anonymous. Independent of every other
   user story's own functionality; it only gates *when* the interactive UI appears, not what it
   does once shown.
+- **Deterministic Turn-Processing Cycle Foundation (Phase 9)**: Depends on Phase 7 (needs
+  `ConversationSession.UserId`/session ownership and the internal-API-key boundary already in
+  place) and reuses Phase 3's `ScoringPolicy`/tool infrastructure. This phase **replaces**
+  `ConversationOrchestrator`'s implementation (T040/T053/T062) with the fixed pipeline — every
+  later phase in this group builds on top of it, and User Stories 1–4's *external* behavior
+  (spec.md acceptance scenarios) MUST remain unchanged; only *how* a turn is processed changes.
+- **Turn Result Types, Tool Recipes & Resource Budgets (Phase 10)**: Depends on Phase 9 (the
+  policy router and pipeline stages it scopes/bounds must already exist).
+- **Evidence Envelope & System Prompts (Phase 11)**: Depends on Phase 9 (tool-result validation)
+  and Phase 10 (`TurnResult`'s structured shape, which the Envelope's canonical data mirrors).
+- **Request Guardrails & Privacy-by-Design (Phase 12)**: Depends on Phase 9 (the input-validation
+  and state-merge stages it extends) and Phase 11 (prompts it restricts). Independent of Phase
+  10, so may proceed in parallel with it if staffed.
+- **MCP/Credential Security Hardening & Safe Observability (Phase 13)**: Depends on Phase 7's
+  existing `InternalApiKeyMiddleware` (T108, which it hardens) and Phase 10/11/12 (the pipeline
+  stages/limits it adds metrics for). Its credential-hardening tasks (T170–T173) have no
+  dependency on Phases 9–12 and may start immediately after Phase 7.
+- **Agentic Security and Quality Eval Suite (Phase 14)**: Depends on Phases 9–13 being complete —
+  its evals verify guarantees those phases implement; writing them earlier would only produce
+  evals with nothing correct yet to verify.
 
 ### Within Each User Story
 
@@ -912,6 +1358,17 @@ Task: "Implement GET /api/pricing/offers endpoints in src/PricingAvailability/Pr
    concurrent-message rejection, and checkout-link generation.
 7. Phase 8 → starting-up/readiness screen and aggregate health-check endpoint (also mitigates
    free-tier cold starts on Render).
+8. Phase 9 → replace the free tool-selection loop with the fixed, deterministic ten-stage cycle
+   (no user-visible behavior change; validate via Phases 1–8's existing scenarios still passing).
+9. Phase 10 → typed turn results, scoped tool recipes, resource budgets, precise hard-constraint
+   filtering → validate independently → deploy/demo.
+10. Phase 11 → Evidence Envelope + grounded narration → validate independently → deploy/demo.
+11. Phase 12 → request guardrails + privacy-by-design (PII screening, deletion, retention,
+    encryption confirmation) → validate independently → deploy/demo.
+12. Phase 13 → MCP/credential hardening + safe observability → validate independently →
+    deploy/demo.
+13. Phase 14 → the agentic security and quality eval suite, CI-gated on the critical classes —
+    the last phase, since it verifies what Phases 9–13 built.
 
 ### Parallel Team Strategy
 

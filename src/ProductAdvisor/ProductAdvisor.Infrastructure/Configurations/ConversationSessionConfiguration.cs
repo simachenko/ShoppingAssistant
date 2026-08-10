@@ -33,8 +33,10 @@ public sealed class ConversationSessionConfiguration : IEntityTypeConfiguration<
             requirement.Property(r => r.Category);
             requirement.Property(r => r.RequiredFeatures);
             requirement.Property(r => r.Preferences);
+            requirement.Property(r => r.AvailabilityRequirements);
             requirement.Property(r => r.Language);
             requirement.Property(r => r.Currency);
+            requirement.Property(r => r.Units);
             requirement.OwnsOne(r => r.Budget, budget =>
             {
                 budget.Property(m => m.Amount);
