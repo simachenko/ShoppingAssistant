@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using ProductAdvisor.Application.Pipeline;
 using ProductAdvisor.Domain;
 
@@ -18,13 +18,14 @@ namespace ProductAdvisor.Application;
 /// performs <b>no product-data computation of its own</b>; every fact/score/rating a user ever
 /// sees came from a tool call (research.md §1, plan.md Summary).
 /// </summary>
-public sealed class ConversationOrchestrator(
+public sealed partial class ConversationOrchestrator(
     IChatClient chatClient,
     IAdvisorToolCatalog toolCatalog,
     IToolResultCapture resultCapture,
     ExtractionStage extractionStage,
     IRecommendationService recommendationService,
-    TurnResourceBudgetGuard budgetGuard)
+    TurnResourceBudgetGuard budgetGuard,
+    ILogger<ConversationOrchestrator> logger)
 {
     private const string LegacyToolSystemPrompt = """
         You are a retail product advisor. The shopper's request has already been classified as
@@ -145,20 +146,15 @@ public sealed class ConversationOrchestrator(
                         .Select(i => new SearchResultReference(i.Candidate.ProductId, i.Candidate.Name))
                         .ToList());
 
-                    var narrationBuilder = new StringBuilder();
-                    await foreach (var update in chatClient.GetStreamingResponseAsync(
-                        BuildNarrateRecommendationMessages(recommendation), cancellationToken: cancellationToken))
-                    {
-                        if (string.IsNullOrEmpty(update.Text))
-                        {
-                            continue;
-                        }
-
-                        narrationBuilder.Append(update.Text);
-                        yield return StreamingTurnUpdate.ForToken(update.Text);
-                    }
-
-                    result = AdvisorTurnResult.ForRecommendation(narrationBuilder.ToString(), recommendation);
+                    // Buffered rather than token-streamed: output validation's grounding check
+                    // (FR-088) must see the complete narration before any of it reaches the
+                    // client — a fabricated value can't be un-sent once streamed. This trades
+                    // per-token streaming for this one route for the same grounding guarantee
+                    // the non-streaming path gets; not fixed by spec.md, which leaves narration
+                    // delivery granularity an implementation detail.
+                    var narration = await NarrateRecommendationAsync(session.CurrentRequirement, recommendation, cancellationToken);
+                    yield return StreamingTurnUpdate.ForToken(narration);
+                    result = AdvisorTurnResult.ForRecommendation(narration, recommendation);
                     break;
                 }
 
@@ -206,6 +202,7 @@ public sealed class ConversationOrchestrator(
         var intent = await extractionStage.ExtractAsync(session.CurrentRequirement, userMessage, cancellationToken);
         if (intent is null)
         {
+            LogTurnClassified(ExtractionStage.PromptVersion, Route.Clarify.ToString());
             return (null, Route.Clarify);
         }
 
@@ -214,8 +211,18 @@ public sealed class ConversationOrchestrator(
             session.MergeRequirement(intent.RequirementPatch);
         }
 
-        return (intent, PolicyRouter.SelectRoute(session.CurrentRequirement, intent));
+        var route = PolicyRouter.SelectRoute(session.CurrentRequirement, intent);
+        LogTurnClassified(ExtractionStage.PromptVersion, route.ToString());
+        return (intent, route);
     }
+
+    /// <summary>FR-101: the exact prompt version behind a turn's classification/narration must be
+    /// runtime-observable, not only inferable from source-control history.</summary>
+    [LoggerMessage(Level = LogLevel.Information, Message = "Turn classified: extractionPromptVersion={ExtractionPromptVersion} route={Route}")]
+    private partial void LogTurnClassified(string extractionPromptVersion, string route);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Narration produced: narrationPromptVersion={NarrationPromptVersion}")]
+    private partial void LogNarrationProduced(string narrationPromptVersion);
 
     private static AdvisorTurnResult HandleClarify(ConversationSession session, StructuredIntent? intent)
     {
@@ -267,9 +274,27 @@ public sealed class ConversationOrchestrator(
             .Select(i => new SearchResultReference(i.Candidate.ProductId, i.Candidate.Name))
             .ToList());
 
+        var narration = await NarrateRecommendationAsync(session.CurrentRequirement, recommendation, cancellationToken);
+        return AdvisorTurnResult.ForRecommendation(narration, recommendation);
+    }
+
+    /// <summary>
+    /// The turn-processing cycle's constrained-narration stage for `recommend` (spec.md
+    /// FR-086/FR-087): builds an <see cref="EvidenceEnvelope"/> from the already-computed
+    /// <see cref="Recommendation"/>, narrates from that Envelope alone (never the raw
+    /// <see cref="Recommendation"/> object), then runs output validation's grounding check
+    /// (FR-088–FR-090) before the narration is used anywhere. This is the one route where FR-087
+    /// is fully met today — see <see cref="ApplyGroundingIfApplicable"/> for the narrower,
+    /// post-hoc treatment the legacy `compare`/`checkout` bridge gets instead.
+    /// </summary>
+    private async Task<string> NarrateRecommendationAsync(
+        UserRequirement requirement, Recommendation recommendation, CancellationToken cancellationToken)
+    {
+        var envelope = EvidenceEnvelopeBuilder.ForRecommendation(requirement, recommendation);
         var response = await chatClient.GetResponseAsync(
-            BuildNarrateRecommendationMessages(recommendation), cancellationToken: cancellationToken);
-        return AdvisorTurnResult.ForRecommendation(response.Text, recommendation);
+            NarrationPrompt.BuildMessages(requirement, envelope), cancellationToken: cancellationToken);
+        LogNarrationProduced(NarrationPrompt.PromptVersion);
+        return OutputValidationStage.Validate(response.Text, envelope);
     }
 
     private async Task<AdvisorTurnResult> RunLegacyToolContinuationAsync(
@@ -299,7 +324,39 @@ public sealed class ConversationOrchestrator(
                 "This request needed more steps than allowed and could not be completed.", degraded: true);
         }
 
-        return FinalizeLegacyTurn(session, response.Text, route);
+        return ApplyGroundingIfApplicable(FinalizeLegacyTurn(session, response.Text, route));
+    }
+
+    /// <summary>
+    /// Post-hoc grounding validation (FR-088–FR-090) for the legacy tool-invocation bridge's
+    /// `comparison`/`checkoutLink` results — applied only from the non-streaming entry point,
+    /// since the streaming entry point has already sent narration tokens to the client by the
+    /// time this would run. This is a narrower guarantee than FR-087's "narration call receives
+    /// ONLY the Envelope" (this bridge's single LLM call still sees raw tool output while
+    /// deciding what to say) — a known, documented gap pending this bridge's full replacement by
+    /// Phase 10's tool-recipe-scoped, two-step flow; what this DOES fully deliver is FR-088's
+    /// promise that no ungrounded claim reaches the user, applied after the fact to whatever
+    /// narration the bridge produced. `product_fact`/`smalltalk` are deliberately excluded: with
+    /// no structured capture to build an Envelope from, an empty-claims check would reject every
+    /// legitimate fact these routes state, which would be a regression, not a safety
+    /// improvement.
+    /// </summary>
+    private static AdvisorTurnResult ApplyGroundingIfApplicable(AdvisorTurnResult result)
+    {
+        var envelope = (result.Type, result.Comparison, result.CheckoutLink) switch
+        {
+            ("comparison", { } comparison, _) => EvidenceEnvelopeBuilder.ForComparison(comparison),
+            ("checkoutLink", _, { } checkoutLink) => EvidenceEnvelopeBuilder.ForCheckoutLink(checkoutLink),
+            _ => null,
+        };
+
+        if (envelope is null || result.Message is null)
+        {
+            return result;
+        }
+
+        var validated = OutputValidationStage.Validate(result.Message, envelope);
+        return string.Equals(validated, result.Message, StringComparison.Ordinal) ? result : result with { Message = validated };
     }
 
     /// <summary>
@@ -341,14 +398,6 @@ public sealed class ConversationOrchestrator(
             "Reply briefly and naturally to this message. You have no product data for this " +
             "reply — do not state any price, specification, or availability."),
         new ChatMessage(ChatRole.User, userMessage),
-    ];
-
-    private static List<ChatMessage> BuildNarrateRecommendationMessages(Recommendation recommendation) =>
-    [
-        new ChatMessage(ChatRole.System,
-            "Narrate the following already-computed recommendation result faithfully. Do not " +
-            "add, alter, or omit any fact, price, or trade-off it does not already contain."),
-        new ChatMessage(ChatRole.User, JsonSerializer.Serialize(recommendation)),
     ];
 
     private static List<ChatMessage> BuildLegacyChatHistory(ConversationSession session)

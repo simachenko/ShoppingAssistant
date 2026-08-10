@@ -1093,37 +1093,95 @@ fallback narration.
 
 ### Tests for This Phase
 
-- [ ] T144 [P] Unit tests for `EvidenceEnvelope` assembly — every `CanonicalData` field has a
+- [X] T144 [P] Unit tests for `EvidenceEnvelope` assembly — every `CanonicalData` field has a
       `VerificationStatus`/`Provenance` entry; the envelope is empty for `smalltalk`/
       `unsupported`; assembly is deterministic across identical tool results — in
-      `tests/ProductAdvisor.Application.Tests/EvidenceEnvelopeTests.cs` (FR-086/FR-091/FR-092).
-- [ ] T145 [P] Contract tests for narration grounding — a stubbed ungrounded claim (price, spec,
+      `tests/ProductAdvisor.Application.Tests/EvidenceEnvelopeTests.cs` (FR-086/FR-091/FR-092). 8
+      tests covering `Recommendation`/`Comparison`/`CheckoutLink`/empty assembly. Also added
+      `tests/ProductAdvisor.Application.Tests/OutputValidationStageTests.cs` (7 tests) — a
+      runnable unit-level counterpart to T145's Docker-dependent contract test, directly proving
+      this phase's Independent Test scenario (a fabricated price is rejected; a grounded
+      narration passes through byte-identical; the fallback is deterministic and never touches
+      `EvidenceEnvelope.CanonicalData`).
+- [X] T145 [P] Contract tests for narration grounding — a stubbed ungrounded claim (price, spec,
       availability, score, rating, delta, or checkout URL not in the Envelope) is rejected/
       stripped/replaced while `items`/`criteria`/`rows`/`fact`/`url` and `type` remain
       byte-identical to the grounded case; the fallback triggers zero additional LLM calls — in
-      `tests/ProductAdvisor.Api.Tests/NarrationGroundingTests.cs` (FR-088–FR-090).
+      `tests/ProductAdvisor.Api.Tests/NarrationGroundingTests.cs` (FR-088–FR-090). **Not run in
+      this sandbox** (Docker/Testcontainers unavailable, same limitation as T026/T044/T118/T134/
+      T136) — confirmed to compile only; reuses T136's `ExtractionAwareScriptedChatClient`.
+      Covers only the `recommend` route (the one route with a fully-separated envelope-only
+      narration call, see T147's note) — a fabricated price and a grounded narration.
 
 ### Implementation for This Phase
 
-- [ ] T146 Implement `EvidenceEnvelope` assembly from validated tool results — result type,
+- [X] T146 Implement `EvidenceEnvelope` assembly from validated tool results — result type,
       canonical structured data, verification status, tool provenance, unverified/unavailable
       fields, tool execution status, allowed-claims whitelist — entirely by deterministic
       application code, in
       `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/EvidenceEnvelopeBuilder.cs`
-      (depends on T134, T144).
-- [ ] T147 Implement the constrained-narration system prompt — receives only the Evidence
+      (depends on T134, T144). Builders for `Recommendation`/`Comparison`/`CheckoutLink`, plus
+      `Empty(resultType)` for `smalltalk`/`unsupported`. Allowed claims are numeric tokens
+      extracted field-by-field (price, score, rating, deltas, specification/criterion values,
+      the stated budget) via a shared `NumericClaim` normalizer
+      (`src/ProductAdvisor/ProductAdvisor.Application/Pipeline/NumericClaim.cs`) — deliberately
+      field-by-field rather than a blanket regex scan over the canonical data's serialized JSON,
+      since the latter would also treat digit-runs inside a product's GUID as "allowed" numbers,
+      narrowing what output validation could actually catch.
+- [X] T147 Implement the constrained-narration system prompt — receives only the Evidence
       Envelope, instructed to summarize salient points rather than restate every value, no
       simultaneous brevity-and-exhaustive-restatement conflict, language/anti-disclosure/
       no-chain-of-thought instructions, versioned — in
       `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/NarrationPrompt.cs` (depends on
-      T146).
-- [ ] T148 Implement output validation's grounding check — every numeric/factual narration claim
+      T146). **Deviates from the planned file path**: kept in `ProductAdvisor.Application/Pipeline/`
+      instead — `ProductAdvisor.Application` does not (and per the constitution's layering, must
+      not) reference `ProductAdvisor.Infrastructure`, so a prompt used by
+      `ConversationOrchestrator` (in Application) cannot live in Infrastructure; the same
+      deviation T131 already recorded for the extraction prompt. **Scope note**: wired into the
+      `recommend` route only (both entry points), which is the one route with a fully
+      tool-call/narration-separated flow already (Phase 9) — FR-086/FR-087 are fully met there. The
+      `compare`/`checkout`/`product_fact` legacy bridge still runs its tool call and narration as
+      one blended LLM turn (the model sees raw tool output while writing narration, not only the
+      Envelope) — closing that gap requires splitting that bridge into the same two-step shape,
+      which is a bigger, riskier change than these six tasks scope for; T148's grounding check is
+      still applied to that bridge's `comparison`/`checkoutLink` output as a post-hoc safety net
+      (see T148's note) even though T147's stricter guarantee isn't fully met there yet.
+- [X] T148 Implement output validation's grounding check — every numeric/factual narration claim
       checked against the Envelope's allowed claims; reject/strip/replace with a deterministic
       (non-LLM) fallback on an ungrounded claim; never alters `TurnResult`'s structured fields or
       type — in `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/OutputValidationStage.cs`
-      (depends on T145, T147).
-- [ ] T149 Add runtime-observable version identifiers to both prompts (T131, T147), logged with
-      every call, in `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/`.
+      (depends on T145, T147). Whole-response rejection granularity (spec.md Assumptions leaves
+      this an implementation detail) — simpler and strictly safer than partial-sentence
+      stripping. Checks both numeric claims (against `AllowedClaims`) and a checkout URL (exact
+      match against `AllowedUrl`) — the fabricated-narration eval class covers 5 of FR-087's
+      seven named categories (price/specification/score/rating/delta via numbers, checkout URL
+      exactly); availability-status *phrases* (e.g. "in stock" stated when the candidate is
+      actually out of stock) are not separately grounded — a known, narrower scope than the full
+      seven, left to the structured UI's own correct rendering. Applied fully to `recommend`
+      (T147); applied as a post-hoc safety net to the legacy bridge's `comparison`/`checkoutLink`
+      results (`ConversationOrchestrator.ApplyGroundingIfApplicable`, non-streaming entry point
+      only — the streaming entry point has already sent narration tokens to the client by the
+      time this would run, an unavoidable consequence of streaming already-sent text). Explicitly
+      NOT applied to `product_fact`/`smalltalk`: neither has a structured capture to build a
+      non-trivial Envelope from, so an empty-claims check would reject every legitimate fact
+      these routes state — that would be a regression, not a safety improvement, so it's left for
+      whichever future work gives `product_fact` its own structured fact capture.
+- [X] T149 Add runtime-observable version identifiers to both prompts (T131, T147), logged with
+      every call, in `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/`. **Deviates from
+      the planned file path** for the same reason as T147. Added `ILogger<ConversationOrchestrator>`
+      (resolved from the host's already-registered logging, no new DI wiring needed) and two
+      `[LoggerMessage]` source-generated log calls — one per turn classification (always logs
+      `ExtractionStage.PromptVersion` + the selected route), one whenever narration actually runs
+      for `recommend` (logs `NarrationPrompt.PromptVersion`) — avoiding the CA1848 boxed-logging
+      warning this codebase otherwise flags.
+
+**Verification**: `dotnet build` — 0 errors, 0 new warnings; `dotnet format --verify-no-changes`
+clean on every file this phase touched. `ProductAdvisor.Domain.Tests`: 58/58 passing (unchanged).
+`ProductAdvisor.Application.Tests`: 50/50 passing (35 + 15 new: 8 `EvidenceEnvelopeTests` + 7
+`OutputValidationStageTests`). `ProductAdvisor.Api.Tests`/`EndToEnd.Tests` confirmed to still
+compile against every signature change in this phase, but — as with every prior phase's Api.Tests
+work (T026/T044/T118/T134/T136) — not run here (Docker/Testcontainers unavailable in this
+sandbox).
 
 **Checkpoint**: Narration can never introduce an unverified fact into a delivered response, and
 the structured UI is always correct independent of narration's fate.
