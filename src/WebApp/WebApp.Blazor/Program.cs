@@ -43,7 +43,8 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 #pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
-builder.Services.AddHttpClient<GatewayApiClient>(client => client.BaseAddress = new Uri("http://gateway-api"))
+builder.Services.AddHttpClient<GatewayApiClient>(client =>
+        client.BaseAddress = builder.Configuration.GetServiceBaseAddress("gateway-api"))
     .AddHttpMessageHandler<BearerTokenHandler>()
     // See the matching comment in Gateway.Api/Program.cs — the SSE streaming call needs a
     // longer, retry-free timeout instead of the standard resilience handler's short-request assumptions.

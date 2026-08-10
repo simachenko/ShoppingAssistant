@@ -1,12 +1,13 @@
 @* Starting-up screen (US6, FR-033–FR-035, research.md §19): checks whether every internal
    service the advisor depends on is reachable before showing the interactive chat UI, rather
    than presenting an experience that looks ready but silently fails on the first real request.
-   The wait is bounded — after MaxAttempts, the UI proceeds anyway with an honest, non-blocking
+   The wait is bounded — after MaxStartupWait, the UI proceeds anyway with an honest, non-blocking
    indication of which service(s) are still unreachable (constitution Principle V). *@
 @rendermode InteractiveServer
 @using WebApp.Blazor.Models
 @using WebApp.Blazor.Services
 @inject GatewayApiClient GatewayApi
+@inject ILogger<StartupGate> Logger
 
 @if (_showGate)
 {
@@ -41,8 +42,9 @@ else
 @code {
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
-    private const int MaxAttempts = 8;
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxStartupWait = TimeSpan.FromMinutes(4);
+    private static readonly TimeSpan StatusRequestTimeout = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
     private bool _showGate = true;
     private bool _degraded;
@@ -51,11 +53,19 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        for (var attempt = 0; attempt < MaxAttempts; attempt++)
+        var deadline = DateTimeOffset.UtcNow + MaxStartupWait;
+        var attempt = 0;
+
+        while (DateTimeOffset.UtcNow < deadline)
         {
+            attempt++;
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            using var requestCts = new CancellationTokenSource(
+                remaining < StatusRequestTimeout ? remaining : StatusRequestTimeout);
+
             try
             {
-                var status = await GatewayApi.GetSystemStatusAsync(CancellationToken.None);
+                var status = await GatewayApi.GetSystemStatusAsync(requestCts.Token);
                 _services = status.Services;
                 _gatewayUnreachable = false;
                 if (status.Overall == "ready")
@@ -64,15 +74,20 @@ else
                     return;
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Gateway itself unreachable — keep retrying within the bounded wait (edge case:
                 // spec.md "web application itself cannot reach the Gateway").
                 _gatewayUnreachable = true;
+                Logger.LogWarning(ex, "Startup readiness attempt {Attempt} failed.", attempt);
             }
 
             StateHasChanged();
-            await Task.Delay(PollInterval);
+            remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining > TimeSpan.Zero)
+            {
+                await Task.Delay(remaining < PollInterval ? remaining : PollInterval);
+            }
         }
 
         // Bounded wait elapsed — proceed anyway, honestly labeled, rather than blocking

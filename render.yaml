@@ -62,16 +62,18 @@ services:
         value: Production
       - key: ConnectionStrings__advisordb
         sync: false
-      - key: services__catalog-api__http__0
+      # Free Render web services cannot receive private-network traffic. Copy each service's
+      # public hostname instead: HTTPS requests to it also wake a sleeping free instance.
+      - key: RenderExternalHosts__catalog-api
         fromService:
           name: catalog-api
           type: web
-          property: hostport
-      - key: services__pricing-api__http__0
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: RenderExternalHosts__pricing-api
         fromService:
           name: pricing-api
           type: web
-          property: hostport
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: LlmProvider__Endpoint
         sync: false
       - key: LlmProvider__ApiKey
@@ -99,21 +101,21 @@ services:
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
-      - key: services__catalog-api__http__0
+      - key: RenderExternalHosts__catalog-api
         fromService:
           name: catalog-api
           type: web
-          property: hostport
-      - key: services__pricing-api__http__0
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: RenderExternalHosts__pricing-api
         fromService:
           name: pricing-api
           type: web
-          property: hostport
-      - key: services__advisor-api__http__0
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: RenderExternalHosts__advisor-api
         fromService:
           name: advisor-api
           type: web
-          property: hostport
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: InternalApiKey
         sync: false
       - key: Authentication__Google__ClientId
@@ -137,11 +139,11 @@ services:
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
-      - key: services__gateway-api__http__0
+      - key: RenderExternalHosts__gateway-api
         fromService:
           name: gateway-api
           type: web
-          property: hostport
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
       - key: Authentication__Google__ClientId
         sync: false
       - key: Authentication__Google__ClientSecret

@@ -62,12 +62,23 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddTransient<UserIdForwardingHandler>();
 
+var advisorBaseAddress = builder.Configuration.GetServiceBaseAddress("advisor-api");
+var catalogBaseAddress = builder.Configuration.GetServiceBaseAddress("catalog-api");
+var pricingBaseAddress = builder.Configuration.GetServiceBaseAddress("pricing-api");
+
+// YARP also needs the public Render endpoints on the free plan. In local/Aspire and Docker
+// environments these remain the logical service-discovery addresses from appsettings.json.
+builder.Configuration["ReverseProxy:Clusters:catalog-cluster:Destinations:destination1:Address"] =
+    catalogBaseAddress.ToString();
+builder.Configuration["ReverseProxy:Clusters:pricing-cluster:Destinations:destination1:Address"] =
+    pricingBaseAddress.ToString();
+
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
     .AddServiceDiscoveryDestinationResolver();
 
 #pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
-builder.Services.AddHttpClient<AdvisorApiClient>(client => client.BaseAddress = new Uri("http://advisor-api"))
+builder.Services.AddHttpClient<AdvisorApiClient>(client => client.BaseAddress = advisorBaseAddress)
     .AddHttpMessageHandler<UserIdForwardingHandler>()
     // ServiceDefaults' standard resilience handler assumes short request/response calls (10s
     // per-attempt, 30s total, with retries) — wrong on two counts for the SSE streaming call:
@@ -78,8 +89,14 @@ builder.Services.AddHttpClient<AdvisorApiClient>(client => client.BaseAddress = 
     .AddResilienceHandler("advisor-streaming", pipeline => pipeline.AddTimeout(TimeSpan.FromMinutes(5)));
 #pragma warning restore EXTEXP0001
 
-builder.Services.AddHttpClient<CatalogApiClient>(client => client.BaseAddress = new Uri("http://catalog-api"));
-builder.Services.AddHttpClient<PricingApiClient>(client => client.BaseAddress = new Uri("http://pricing-api"));
+#pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is experimental
+builder.Services.AddHttpClient<CatalogApiClient>(client => client.BaseAddress = catalogBaseAddress)
+    .RemoveAllResilienceHandlers()
+    .AddResilienceHandler("catalog-cold-start", pipeline => pipeline.AddTimeout(TimeSpan.FromMinutes(2)));
+builder.Services.AddHttpClient<PricingApiClient>(client => client.BaseAddress = pricingBaseAddress)
+    .RemoveAllResilienceHandlers()
+    .AddResilienceHandler("pricing-cold-start", pipeline => pipeline.AddTimeout(TimeSpan.FromMinutes(2)));
+#pragma warning restore EXTEXP0001
 
 var app = builder.Build();
 
@@ -120,7 +137,10 @@ static async Task<ServiceReadiness> CheckServiceAsync(
     string name, Func<CancellationToken, Task<bool>> isAliveAsync, CancellationToken ct)
 {
     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-    timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+    // A public request is what wakes a sleeping Render free instance. Render documents a cold
+    // start of about one minute, so keep the probe alive long enough to both trigger and observe
+    // that wake-up. The three probes run concurrently, not sequentially.
+    timeoutCts.CancelAfter(TimeSpan.FromSeconds(90));
 
     bool reachable;
     try
