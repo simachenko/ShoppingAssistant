@@ -288,3 +288,20 @@ service with exactly one caller — the shared comparison-composition service in
 `ProductAdvisor.Infrastructure` (research.md §14) — which is itself called from two places
 (`compare_products` tool handler, `POST /api/comparisons`). Neither domain service is ever called
 directly by the `ProductAdvisor.Application` conversation loop.
+
+### SystemReadinessStatus (transient, request-scoped — not persisted)
+
+The response shape of Gateway's `GET /api/system-status` (FR-033/FR-034/FR-035, research.md §19)
+— a point-in-time snapshot only, never stored, and never a substitute for a request's own honest
+handling of an unavailable dependency (constitution Principle V).
+
+| Field | Type | Notes |
+|---|---|---|
+| `Overall` | `"ready"` \| `"degraded"` | `"degraded"` when one or more entries in `Services` are `Reachable: false` |
+| `Services` | `List<ServiceReadiness>` | One entry per internal service the advisor depends on (Catalog, Pricing, Advisor) |
+
+`ServiceReadiness`: `Name` (string, e.g. `"catalog-api"`), `Reachable` (bool — the result of
+calling that service's own `/alive` with a short timeout), `CheckedAt` (`DateTimeOffset`, when
+this particular check ran). Built fresh on every call to `GET /api/system-status` by concurrently
+probing each service's existing liveness endpoint (`Task.WhenAll`, the same pushdown-composition
+pattern as `GET /api/products/{productId}`) — no caching, no separate readiness store.

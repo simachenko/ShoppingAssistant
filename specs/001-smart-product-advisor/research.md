@@ -545,3 +545,46 @@ discovery document, and it would couple purely-internal services to a user-facin
 provider for no benefit — the internal boundary and the user-facing boundary are deliberately
 independent mechanisms answering different questions ("is this a legitimate internal caller?" vs.
 "is this a legitimate signed-in user?").
+
+## 19. Startup readiness ("loading screen"): an aggregate status endpoint on Gateway (FR-033/FR-034/FR-035/SC-020/SC-021)
+
+**Decision**: Gateway exposes a new, unauthenticated (`AllowAnonymous`, same posture as `/alive`
+— research.md §16/§18) endpoint, `GET /api/system-status`, that concurrently calls Catalog's,
+Pricing's, and Advisor's existing `/alive` endpoints (`Task.WhenAll`, the same pushdown-
+composition pattern as `GET /api/products/{productId}`, research.md §13) with a short per-call
+timeout, and returns a per-service reachable/unreachable status plus an overall
+`ready`/`degraded` summary. No new health-check mechanism is introduced — this endpoint only
+*aggregates and exposes* the same liveness signal FR-028 already requires every service to
+expose, from the one place (Gateway) the WebApp is allowed to call at all (constitution's
+single-entry-point rule, plan.md Summary). WebApp.Blazor polls this endpoint on initial load,
+shows a starting-up state while doing so, and — after a bounded wait (a small, fixed number of
+attempts/seconds) — proceeds to the interactive chat UI regardless of outcome, surfacing which
+service(s) are still unreachable if any are (FR-034).
+
+**Rationale**: Reuses existing infrastructure (each service's `/alive`, the Gateway's established
+fan-out-and-merge pattern) rather than inventing a second "are you up" protocol. Keeping this
+endpoint anonymous — like `/alive` itself — means the startup check can run *before* the Google
+sign-in redirect completes too, so probing it can help mitigate cold starts (see below) as early
+as possible in the visit, not only after authentication finishes. Bounding the wait (rather than
+blocking until every service responds) is the same "never let observability/readiness concerns
+fail a user-facing flow" posture FR-032 already establishes for telemetry, applied to startup.
+
+**A useful side effect, not a guarantee**: on a host where a free/idle service can go to sleep
+(e.g., Render's free tier), the act of this endpoint probing each service's `/alive` is itself a
+request that prompts a sleeping service to wake up — so by the time the shopper's first real chat
+message is sent, the service has likely already been "warmed" by the startup check. This project
+does not add a test asserting Render specifically wakes up faster because of this — that would be
+testing a third party's infrastructure behavior, not this system — it's simply a beneficial
+consequence of a check the system needs anyway.
+
+**Alternatives considered**: (a) WebApp calling Catalog/Pricing/Advisor's `/alive` endpoints
+directly, bypassing Gateway — rejected; it breaks the established "Gateway is the single entry
+point, WebApp never calls the others directly" rule (plan.md Summary) for no benefit, and would
+require exposing three more hostnames to the browser-facing app. (b) Blocking indefinitely until
+every dependent service reports healthy — rejected; a genuinely down dependency would leave the
+shopper stuck on a starting-up screen forever, which is exactly the kind of silent, unbounded
+failure the constitution's Principle V ("honest partial response, not complete failure") already
+rules out elsewhere in this system. (c) A dedicated, separate "warm-up service" or scheduled
+background job pinging every service on a timer — rejected as disproportionate infrastructure for
+this system's scale; the on-demand, per-page-load check already accomplishes the same warm-up
+side effect without an always-running extra process.

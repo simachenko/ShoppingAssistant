@@ -1,0 +1,83 @@
+@* Starting-up screen (US6, FR-033–FR-035, research.md §19): checks whether every internal
+   service the advisor depends on is reachable before showing the interactive chat UI, rather
+   than presenting an experience that looks ready but silently fails on the first real request.
+   The wait is bounded — after MaxAttempts, the UI proceeds anyway with an honest, non-blocking
+   indication of which service(s) are still unreachable (constitution Principle V). *@
+@rendermode InteractiveServer
+@using WebApp.Blazor.Models
+@using WebApp.Blazor.Services
+@inject GatewayApiClient GatewayApi
+
+@if (_showGate)
+{
+    <div class="startup-gate">
+        <h2>Starting up…</h2>
+        <ul>
+            @foreach (var service in _services)
+            {
+                <li>@service.Name: @(service.Reachable ? "ready" : "checking…")</li>
+            }
+        </ul>
+    </div>
+}
+else
+{
+    @if (_gatewayUnreachable)
+    {
+        <div class="alert alert-danger">
+            Can't reach the advisor right now. Continuing — some features may be temporarily unavailable.
+        </div>
+    }
+    else if (_degraded)
+    {
+        <div class="alert alert-warning">
+            Still starting up: @string.Join(", ", _services.Where(s => !s.Reachable).Select(s => s.Name)).
+            Continuing — some features may be temporarily unavailable.
+        </div>
+    }
+    @ChildContent
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private const int MaxAttempts = 8;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
+    private bool _showGate = true;
+    private bool _degraded;
+    private bool _gatewayUnreachable;
+    private IReadOnlyList<ServiceReadinessDto> _services = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        for (var attempt = 0; attempt < MaxAttempts; attempt++)
+        {
+            try
+            {
+                var status = await GatewayApi.GetSystemStatusAsync(CancellationToken.None);
+                _services = status.Services;
+                _gatewayUnreachable = false;
+                if (status.Overall == "ready")
+                {
+                    _showGate = false;
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                // Gateway itself unreachable — keep retrying within the bounded wait (edge case:
+                // spec.md "web application itself cannot reach the Gateway").
+                _gatewayUnreachable = true;
+            }
+
+            StateHasChanged();
+            await Task.Delay(PollInterval);
+        }
+
+        // Bounded wait elapsed — proceed anyway, honestly labeled, rather than blocking
+        // indefinitely (FR-034/SC-021).
+        _degraded = true;
+        _showGate = false;
+    }
+}

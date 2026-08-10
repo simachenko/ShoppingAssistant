@@ -41,3 +41,9 @@ public sealed record ChatTurnDto(
 /// (<see cref="Result"/> set).
 /// </summary>
 public sealed record ChatStreamEvent(string? Delta, ChatTurnDto? Result);
+
+/// <summary>Wire shape of <c>GET /api/system-status</c> (FR-033–FR-035, research.md §19), used
+/// by the starting-up screen before showing the interactive chat UI.</summary>
+public sealed record SystemReadinessStatusDto(string Overall, IReadOnlyList<ServiceReadinessDto> Services);
+
+public sealed record ServiceReadinessDto(string Name, bool Reachable, DateTimeOffset CheckedAt);

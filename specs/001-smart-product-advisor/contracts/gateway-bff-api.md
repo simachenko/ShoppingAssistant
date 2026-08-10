@@ -13,6 +13,10 @@ WebApp. `401` on a missing, invalid, or expired token. On every downstream call,
 attaches the internal API key (FR-029, research.md §18) and forwards the token's `sub` claim as
 `X-User-Id` so Advisor can enforce session ownership (FR-031).
 
+**Exception**: `GET /api/system-status` (below) is deliberately anonymous — it exists so
+WebApp's starting-up screen can check readiness even before the Google sign-in redirect
+completes, matching `/alive`'s own anonymous posture (research.md §19).
+
 ## POST /api/chat/messages
 
 Composition endpoint over the Advisor conversation API.
@@ -90,6 +94,31 @@ the explicit product-picker's "Compare" button calls; it never touches `/api/cha
 
 **Response 200**: identical to `POST /api/comparisons`'s response.
 
+## GET /api/system-status
+
+Aggregate startup-readiness check consumed by WebApp's starting-up screen (FR-033/FR-034/FR-035,
+research.md §19) — **anonymous, no `Authorization` header required** (see Authentication above).
+Concurrently calls Catalog's, Pricing's, and Advisor's own `/alive` endpoints with a short
+per-call timeout and merges the results; introduces no new health-check mechanism, only exposes
+the one FR-028 already requires from a place WebApp is allowed to call.
+
+**Response 200** (always `200`, even when every dependent service is unreachable — this endpoint
+reports status, it never fails the caller):
+
+```json
+{
+  "overall": "ready",
+  "services": [
+    { "name": "catalog-api", "reachable": true, "checkedAt": "2026-08-04T20:00:00Z" },
+    { "name": "pricing-api", "reachable": true, "checkedAt": "2026-08-04T20:00:00Z" },
+    { "name": "advisor-api", "reachable": true, "checkedAt": "2026-08-04T20:00:00Z" }
+  ]
+}
+```
+
+`overall` is `"degraded"` when any entry's `reachable` is `false`. See `SystemReadinessStatus` in
+`data-model.md`.
+
 ## Contract test expectations
 
 - `X-Correlation-Id` is present on every downstream call the Gateway makes (asserted via a
@@ -117,3 +146,8 @@ the explicit product-picker's "Compare" button calls; it never touches `/api/cha
 - `GET /api/chat/{sessionId}` for a session id that belongs to a different authenticated user
   returns `404`, identical to an unknown session id (FR-031) — a non-owner cannot distinguish
   "doesn't exist" from "not yours" from the response alone.
+- `GET /api/system-status` succeeds with no `Authorization` header at all (SC-020/SC-021) — it is
+  the one deliberate exception to this contract's blanket `401` rule.
+- `GET /api/system-status` returns `overall: "ready"` when all three dependent `/alive` checks
+  succeed, and `overall: "degraded"` — still `200`, never a `5xx` — when one or more time out or
+  fail, with `reachable: false` on exactly the affected entry/entries.

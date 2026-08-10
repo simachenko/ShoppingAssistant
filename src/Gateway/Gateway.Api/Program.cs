@@ -93,6 +93,50 @@ app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.MapReverseProxy();
 
+// GET /api/system-status — aggregate startup-readiness check consumed by WebApp's starting-up
+// screen (FR-033/FR-034/FR-035, research.md §19). Deliberately anonymous — see Authentication
+// in contracts/gateway-bff-api.md — so it can run even before the Google sign-in redirect
+// completes. Reuses each service's own /alive (FR-028); introduces no new health-check
+// mechanism, only aggregates the one that already exists (research.md §13's pushdown-composition
+// pattern, applied to liveness instead of product data).
+app.MapGet("/api/system-status", async (
+    CatalogApiClient catalog, PricingApiClient pricing, AdvisorApiClient advisor, CancellationToken ct) =>
+{
+    var checks = await Task.WhenAll(
+        CheckServiceAsync("catalog-api", catalog.IsAliveAsync, ct),
+        CheckServiceAsync("pricing-api", pricing.IsAliveAsync, ct),
+        CheckServiceAsync("advisor-api", advisor.IsAliveAsync, ct));
+
+    var overall = checks.All(c => c.Reachable) ? "ready" : "degraded";
+    return Results.Ok(new SystemReadinessStatus(overall, checks));
+})
+.AllowAnonymous();
+
+// A single service's liveness check must never make the whole aggregate hang or fail — each
+// check gets its own short timeout, independent of the other two, and any failure (connection
+// refused, timeout, broken circuit) is reported as simply "not reachable right now" rather than
+// propagating as an error (constitution Principle V, FR-034).
+static async Task<ServiceReadiness> CheckServiceAsync(
+    string name, Func<CancellationToken, Task<bool>> isAliveAsync, CancellationToken ct)
+{
+    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+
+    bool reachable;
+    try
+    {
+        reachable = await isAliveAsync(timeoutCts.Token);
+    }
+#pragma warning disable CA1031 // Intentional: any failure here means "not reachable," never an error the caller sees.
+    catch (Exception)
+#pragma warning restore CA1031
+    {
+        reachable = false;
+    }
+
+    return new ServiceReadiness(name, reachable, DateTimeOffset.UtcNow);
+}
+
 // POST /api/chat/messages — starts a session if none given, forwards the message, and merges
 // the resolved sessionId into Advisor's (otherwise pass-through) response (contracts/gateway-bff-api.md).
 app.MapPost("/api/chat/messages", async (ChatMessageRequest request, AdvisorApiClient advisor, CancellationToken ct) =>

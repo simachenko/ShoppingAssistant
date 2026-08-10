@@ -44,6 +44,14 @@ mechanism end-to-end, now exported to a real backend instead of console-only out
 always best-effort relative to the request it describes — an unreachable observability backend
 never blocks or fails a user-facing request.
 
+Before the shopper reaches an interactive chat screen at all, WebApp.Blazor shows a starting-up
+state and polls a new Gateway endpoint that aggregates every dependent service's existing
+liveness check (FR-033–FR-035, research.md §19) — no new health-check mechanism, just Gateway
+fanning out to the same `/alive` endpoints FR-028 already requires and merging the result, the
+same pushdown-composition pattern already used for product detail/search. The wait is bounded:
+the shopper always reaches the interactive UI, honestly labeled if something is still
+unreachable, rather than being blocked indefinitely.
+
 Two capabilities are deliberately reachable **outside** the LLM's tool-selection decision, so
 the highest-value operations don't depend on the model choosing to invoke them correctly
 (FR-018–FR-022, research.md §13–§14): (1) product search accepts explicit, structured filters —
@@ -229,11 +237,16 @@ src/
 │                                                # comparison endpoint), POST /api/products/checkout-link
 │                                                # (FR-025), JWT Bearer validation of the caller's Google
 │                                                # identity token on every endpoint (FR-030, research.md §17),
-│                                                # and session-ownership enforcement (FR-031) (+ Dockerfile)
+│                                                # session-ownership enforcement (FR-031), and the anonymous
+│                                                # GET /api/system-status aggregate-readiness endpoint consumed
+│                                                # by WebApp's starting-up screen (FR-033–FR-035, research.md
+│                                                # §19) (+ Dockerfile)
 │
 └── WebApp/
     └── WebApp.Blazor/                        # Blazor Web App (Interactive Server): Google sign-in
-                                                # (cookie auth + OIDC challenge, FR-030), chat (consumes the
+                                                # (cookie auth + OIDC challenge, FR-030), a starting-up screen
+                                                # that polls GET /api/system-status before showing the
+                                                # interactive chat UI (FR-033–FR-035), chat (consumes the
                                                 # Gateway's SSE stream server-side, forwarding the signed-in
                                                 # user's identity token), recommendations, comparison view,
                                                 # an explicit product-picker page (search/filter + select +

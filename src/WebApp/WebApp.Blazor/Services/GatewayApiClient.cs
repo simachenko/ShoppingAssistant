@@ -110,4 +110,17 @@ public sealed class GatewayApiClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<ProductCandidateDto>(cancellationToken);
     }
+
+    /// <summary>
+    /// Aggregate startup-readiness check (FR-033–FR-035, research.md §19) consumed by the
+    /// starting-up screen before the interactive chat UI is shown. Anonymous on the Gateway side
+    /// — works even before sign-in completes.
+    /// </summary>
+    public async Task<SystemReadinessStatusDto> GetSystemStatusAsync(CancellationToken cancellationToken)
+    {
+        var response = await httpClient.GetAsync("/api/system-status", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<SystemReadinessStatusDto>(cancellationToken);
+        return result ?? throw new InvalidOperationException("Gateway returned an empty system-status response.");
+    }
 }

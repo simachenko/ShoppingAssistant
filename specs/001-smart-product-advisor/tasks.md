@@ -747,6 +747,69 @@ the loop from recommendation/comparison to purchase.
 
 ---
 
+## Phase 8: Startup Readiness ("Loading Screen") & Service Warm-Up (US6)
+
+> **Numbering note**: continues task IDs from T119 (highest previously used: T118). See
+> spec.md FR-033/FR-034/FR-035, User Story 6, SC-020/SC-021, and research.md §19 for the
+> requirements and design this phase implements.
+
+**Goal**: Before a shopper reaches the interactive chat UI, the web app shows a starting-up
+state and confirms Catalog/Pricing/Advisor are reachable via a new Gateway aggregate endpoint
+that reuses each service's existing `/alive` liveness check. The wait is bounded — the shopper
+always reaches the interactive UI, honestly labeled if something is still unreachable, rather
+than being blocked indefinitely — and, on hosts where an idle service can go to sleep (e.g.
+Render's free tier), this check's own act of probing each service doubles as a warm-up ping.
+
+**Independent Test**: Load the web app with one or more dependent services simulated as
+unreachable and confirm a starting-up/degraded state is shown, then that the interactive UI
+still appears after the bounded wait with the affected service(s) indicated; load it again with
+all services reachable and confirm the interactive UI appears promptly.
+
+### Tests for This Phase
+
+- [X] T119 [P] Contract test: `GET /api/system-status` succeeds with no `Authorization` header,
+      returns `overall: "ready"` when all three simulated `/alive` checks succeed, and
+      `overall: "degraded"` (still `200`, never a `5xx`) with the correct `reachable: false`
+      entry/entries when one or more are simulated as failing/timing out, in
+      `tests/Gateway.Api.Tests/SystemStatusContractTests.cs` (FR-033/FR-034/FR-035,
+      SC-020/SC-021).
+- [ ] T120 [P] Test: the starting-up screen shows the interactive UI once all services report
+      reachable, and shows the interactive UI anyway (with a degraded indicator naming the
+      affected service) once the bounded wait elapses while a service is still unreachable — in
+      `tests/EndToEnd.Tests/` (simulating a stopped service against the live stack), or a
+      WebApp-level component test if a Blazor test approach is already in place.
+      Not yet covered by an automated test — the whole app requires a real signed-in Google
+      identity before `Home.razor` renders at all (FR-030), so exercising `StartupGate.razor`'s
+      own polling/timeout logic needs either a real browser session (Playwright-style) or bUnit,
+      neither of which this project has set up yet. `T119`'s Gateway-level contract tests fully
+      cover the `ready`/`degraded` aggregation logic the component depends on; only the
+      Razor component's client-side polling loop itself is untested.
+
+### Implementation for This Phase
+
+- [X] T121 Implement `GET /api/system-status` in `src/Gateway/Gateway.Api/` — concurrently calls
+      Catalog's, Pricing's, and Advisor's `/alive` endpoints with a short per-call timeout
+      (`Task.WhenAll`, mirroring the existing product-detail/search composition pattern), merges
+      into the `SystemReadinessStatus` shape (data-model.md), and marks the endpoint
+      `AllowAnonymous` (depends on T119).
+- [X] T122 Implement the starting-up screen in `src/WebApp/WebApp.Blazor/` — shown before the
+      interactive chat UI, polls `GET /api/system-status` on load, shows per-service status
+      while waiting, and proceeds to the interactive UI either once `overall: "ready"` or once a
+      bounded wait elapses, surfacing which service(s) are still unreachable in the latter case
+      (depends on T121, T120).
+- [ ] T123 Manually re-verify against the deployed (Render) stack: reload the web app and
+      confirm the starting-up screen appears and resolves; simulate a backing service outage
+      (e.g. stop it, or break its `InternalApiKey`) and confirm the starting-up screen still
+      resolves to the interactive UI after its bounded wait, correctly naming the affected
+      service.
+
+**Checkpoint**: A shopper never sees an interactive-looking UI before the system has actually
+checked its own readiness, is never blocked indefinitely if a dependency is down, and — as a
+side effect on hosts like Render — dependent services are more likely to already be warm by the
+time real usage begins.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -778,6 +841,11 @@ the loop from recommendation/comparison to purchase.
   Phase 4.5's `LastSearchResults` (T096) and Phase 4.6's per-turn structured rendering (T101).
   Every other user story remains independently testable underneath the new auth boundary — the
   boundary changes *who* can reach a story, not what the story does once reached.
+- **Startup Readiness / Loading Screen (Phase 8)**: Depends on Phase 7's Gateway (the new
+  endpoint sits alongside its existing composition endpoints) but not on Phase 7's auth boundary
+  specifically — `GET /api/system-status` is deliberately anonymous. Independent of every other
+  user story's own functionality; it only gates *when* the interactive UI appears, not what it
+  does once shown.
 
 ### Within Each User Story
 
@@ -842,6 +910,8 @@ Task: "Implement GET /api/pricing/offers endpoints in src/PricingAvailability/Pr
 5. Polish (Phase 6) → full observability, resilience, and CI/CD hardening.
 6. Phase 7 → access control (Google sign-in + internal API key), a real observability backend,
    concurrent-message rejection, and checkout-link generation.
+7. Phase 8 → starting-up/readiness screen and aggregate health-check endpoint (also mitigates
+   free-tier cold starts on Render).
 
 ### Parallel Team Strategy
 

@@ -35,4 +35,12 @@ public sealed class CatalogApiClient(HttpClient httpClient)
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<CatalogProductDetailDto>(cancellationToken);
     }
+
+    /// <summary>Used only by <c>GET /api/system-status</c> (FR-033, research.md §19) — reuses the
+    /// service's own liveness check rather than a second "are you up" mechanism.</summary>
+    public async Task<bool> IsAliveAsync(CancellationToken cancellationToken)
+    {
+        var response = await httpClient.GetAsync("/alive", cancellationToken);
+        return response.IsSuccessStatusCode;
+    }
 }

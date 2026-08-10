@@ -98,6 +98,31 @@ A visitor arrives at the site and must sign in with their Google account before 
 
 ---
 
+### User Story 6 - See the System Ready Before Interacting (Priority: P5)
+
+A visitor who has just signed in sees a brief starting-up state while the system confirms its
+internal services are reachable, rather than an interactive chat screen that looks ready but
+fails on the first message.
+
+**Why this priority**: This is a quality-of-service safeguard, not a new shopping capability —
+every other user story already works correctly once the underlying services are actually up;
+this story only makes that "actually up" state visible and honest instead of assumed. Unlike
+User Story 5 (sign-in), it does not gate the others by blocking indefinitely — it degrades to
+"proceed anyway, honestly labeled" rather than remaining a hard prerequisite.
+
+**Independent Test**: Can be tested by simulating one or more internal services as unreachable
+at startup and confirming the shopper sees a starting-up/degraded state rather than a chat UI
+that appears normal; and by confirming that once services become reachable, the interactive UI
+is shown without requiring a manual page reload beyond the bounded wait.
+
+**Acceptance Scenarios**:
+
+1. **Given** a visitor has just signed in, **When** the web application loads, **Then** it shows a starting-up state and checks whether Catalog, Pricing, and Advisor are reachable before presenting the interactive chat UI.
+2. **Given** all dependent services are reachable, **When** the startup check completes, **Then** the interactive chat UI is shown without unnecessary delay.
+3. **Given** one or more dependent services are still unreachable after the bounded wait, **When** the startup check's wait elapses, **Then** the interactive UI is shown anyway, with a clear, honest indication of which service(s) are still not reachable.
+
+---
+
 ### Edge Cases
 
 - What happens when the user's stated budget is below the price of the cheapest relevant product? The advisor MUST communicate that no match exists rather than recommending an over-budget item.
@@ -117,6 +142,9 @@ A visitor arrives at the site and must sign in with their Google account before 
 - What happens when a request between two internal services arrives without the correct internal credential? The receiving service MUST refuse the request rather than processing it — internal endpoints are never reachable on the trust of network location alone.
 - What happens when a signed-in user requests a conversation session id that belongs to a different user? The system MUST refuse access rather than returning that session's content, regardless of whether the id itself is guessable or was leaked.
 - What happens when the observability/monitoring backend is temporarily unreachable? The system MUST continue serving requests normally — logging, tracing, and metrics export are never allowed to block or fail a user-facing request.
+- What happens when one or more internal services never become reachable within the bounded startup wait? The system MUST proceed to the interactive experience anyway, clearly indicating which service(s) are still unreachable, rather than leaving the shopper on a starting-up state indefinitely.
+- What happens when a service reports reachable during the startup check but becomes unreachable moments later? The startup check is a point-in-time signal, not a guarantee — the system's existing per-request honesty (FR-005/FR-014) still governs any request made after startup, independent of what the startup check reported.
+- What happens when the web application itself cannot reach the Gateway to perform the startup check at all? The shopper MUST see an honest "can't reach the advisor right now" state rather than a starting-up screen that never resolves or a UI that silently proceeds as if nothing were wrong.
 
 ## Requirements *(mandatory)*
 
@@ -154,6 +182,9 @@ A visitor arrives at the site and must sign in with their Google account before 
 - **FR-030**: Every user-facing entry point MUST require the user to be signed in with a Google account before any product data, conversation state, or advisor response is returned; a request without a valid, current signed-in identity MUST be refused rather than served anonymously.
 - **FR-031**: The system MUST bind each conversation session to the identity of the user who created it, and MUST refuse any attempt — by a different signed-in user — to read or continue a session that is not theirs.
 - **FR-032**: Logging, tracing, and metrics collection MUST NOT block or fail a user-facing request if the observability backend they report to is unavailable — observability is always best-effort relative to the request it describes.
+- **FR-033**: Before a shopper can begin using the advisor (chat, search, comparison), the system MUST check whether every internal service it depends on is currently reachable and MUST show the shopper a starting-up state, rather than an interactive experience that appears ready but silently fails on the first real request.
+- **FR-034**: The starting-up check MUST NOT block the shopper indefinitely: after a bounded wait, the system MUST proceed to the interactive experience regardless of outcome, and MUST clearly indicate to the shopper which service(s), if any, are still not reachable — the same honest-partial-response posture as FR-014, applied at startup rather than mid-request.
+- **FR-035**: The starting-up check MUST reuse each service's existing health-check mechanism (FR-028) rather than introducing a separate way of reporting whether a service is up.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -165,6 +196,7 @@ A visitor arrives at the site and must sign in with their Google account before 
 - **Search Filter**: A structured description of what a product search must satisfy — category, free-text keywords, a price range, and zero or more characteristic conditions (attribute name, comparison operator, value) — evaluated deterministically; never inferred or approximated by the language model.
 - **Checkout Link**: A URL to the retailer's own checkout/purchase flow, carrying the identifiers of one or more products the user picked or was most recently shown, as query parameters — constructed deterministically from known identifiers, never guessed. This system does not implement the destination checkout flow itself.
 - **User**: A signed-in shopper's identity, established via Google sign-in — at minimum a stable identifier and the account's email, used to bind conversation sessions to their owner and to refuse cross-user access. The system does not build its own account/password system; identity is entirely delegated to Google.
+- **System Readiness Status**: A point-in-time, not-persisted snapshot of whether each internal service the advisor depends on was reachable when last checked (at minimum: reachable/unreachable per service), used only to drive the starting-up state — never stored, and never a substitute for a request's own honest handling of an unavailable dependency.
 
 ## Success Criteria *(mandatory)*
 
@@ -189,6 +221,8 @@ A visitor arrives at the site and must sign in with their Google account before 
 - **SC-017**: 100% of user-facing requests without a valid, current signed-in Google identity are refused before any product data, conversation state, or advisor response is returned.
 - **SC-018**: 0% of attempts by one signed-in user to read or continue another signed-in user's conversation session succeed.
 - **SC-019**: 100% of service start events, service stop events, handled requests, and encountered errors appear in the shared logging/tracing mechanism; observability backend unavailability causes 0% of user-facing request failures.
+- **SC-020**: 100% of sessions see a starting-up state rather than an interactive UI until either every dependent service is reachable or the bounded wait elapses — never an interactive UI presented before the startup check has run at all.
+- **SC-021**: 100% of the time the bounded wait elapses with one or more services still unreachable, the shopper is shown which service(s) are affected and is still able to proceed, rather than being stuck indefinitely or seeing a generic, unexplained failure.
 
 ## Assumptions
 
@@ -212,3 +246,6 @@ A visitor arrives at the site and must sign in with their Google account before 
 - The session's memory of prior search/recommendation/comparison results (FR-022) holds only the most recently shown set, not a full history of every result ever shown in the conversation.
 - Explanatory narration attached to a directly-invoked comparison (FR-018/FR-019) is optional and best-effort: if it cannot be produced, the comparison's structured data is still returned in full rather than withholding the whole response.
 - Structured-rendering retention (FR-023) is a client-side presentation concern layered on top of FR-017; the backend already returns each turn's full structured result independently, so retaining prior renderings requires no new backend data, only that the conversation view keep what it already received instead of discarding it on the next turn.
+- The starting-up check (FR-033–FR-035) is an operational/UX concern layered on the existing health-check mechanism (FR-028); it introduces no new business data and its result is never persisted.
+- On hosting environments where a service can go idle and take a moment to respond to its first request after inactivity, the startup check's own act of probing each service is expected to also prompt it to become ready — this is a beneficial side effect of the check, not a separate feature requiring its own guarantee or test.
+- Preparing or pre-fetching resources specific to the signed-in user during the starting-up window (e.g., warming a personalized cache) is explicitly out of scope for this increment; the startup check only reports reachability, it does not perform any per-user work.
