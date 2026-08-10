@@ -36,7 +36,7 @@ public class FollowUpQuestionTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(session, "Tell me more about the first one", CancellationToken.None);
 
@@ -60,7 +60,7 @@ public class FollowUpQuestionTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(session, "the first one, please", CancellationToken.None);
 

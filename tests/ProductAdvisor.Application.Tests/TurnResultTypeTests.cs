@@ -21,7 +21,7 @@ public class TurnResultTypeTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "write me a poem", CancellationToken.None);
@@ -38,7 +38,7 @@ public class TurnResultTypeTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, TestLogger.Instance);
+            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "hello!", CancellationToken.None);
@@ -61,7 +61,7 @@ public class TurnResultTypeTests
             ExtractionJson.Recommend("smartphones", 15000m, "UAH"), "Nothing fits right now.");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient), new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, TestLogger.Instance);
+            new ExtractionStage(chatClient), new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "I need a smartphone under 15000 UAH", CancellationToken.None);

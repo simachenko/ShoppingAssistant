@@ -85,4 +85,20 @@ public sealed class AdvisorApiClient(HttpClient httpClient)
         var response = await httpClient.GetAsync("/alive", cancellationToken);
         return response.IsSuccessStatusCode;
     }
+
+    /// <summary>FR-119: user-initiated deletion of one session. Returns whether the session was
+    /// found and owned by the caller (mirroring the 404 <see cref="GetSnapshotAsync"/> already
+    /// gives for the same two indistinguishable cases) or whether it's still mid-turn (409).</summary>
+    public async Task<HttpStatusCode> DeleteSessionAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        var response = await httpClient.DeleteAsync($"/api/conversations/{sessionId}", cancellationToken);
+        return response.StatusCode;
+    }
+
+    /// <summary>FR-119: user-initiated deletion of every session belonging to the caller.</summary>
+    public async Task DeleteAllSessionsAsync(CancellationToken cancellationToken)
+    {
+        var response = await httpClient.DeleteAsync("/api/conversations", cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
 }

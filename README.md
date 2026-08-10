@@ -109,6 +109,33 @@ An unreachable/misconfigured OTLP backend never blocks a request — export fail
 swallowed by the OpenTelemetry SDK's own batching/retry behavior, not surfaced to callers
 (FR-032, constitution Principle V).
 
+## Privacy & data protection (FR-114–FR-123)
+
+**Encryption in transit** (FR-121): every browser↔Gateway and Gateway↔service hop runs over
+HTTPS — Render terminates TLS at its edge for every web service in `render.yaml` by default, and
+`InternalApiKeyMiddleware` sits behind that, never in front of it. The Neon Postgres connection
+string (`ConnectionStrings__advisordb`/`catalogdb`/`pricingdb`, set as `sync: false` secrets in
+Render's dashboard, never committed) MUST use `sslmode=require` (or stronger) — Neon rejects
+plaintext connections by default, but this is configuration, not something this repo can assert
+about a live deployment without seeing that dashboard; verify it when configuring a new
+environment. System↔LLM-provider calls go through `OpenAIClient`/`Microsoft.Extensions.AI`,
+which only ever calls `https://` endpoints.
+
+**Encryption at rest** (FR-122): Neon Postgres encrypts data at rest by default (a platform
+guarantee, not an app-level setting) — this covers both the primary store and Neon's own
+backups/point-in-time-recovery data, so a backup is never a less-protected copy of the same data.
+
+**LLM provider requirements** (FR-123): the provider is deliberately kept swappable through
+`Microsoft.Extensions.AI.IChatClient` and pure configuration (`LlmProvider:Endpoint`/`ApiKey`/
+`Model`, research.md §10) — no specific provider is hard-coded. This means FR-123 (no training on
+submitted content, bounded/known retention, an acceptable data region) is a **deployment-time
+decision, not a code-level guarantee**: whoever configures `LlmProvider:*` for a given
+environment MUST confirm the chosen provider's current data-handling terms satisfy FR-123 before
+sending real conversation content to it — a provider that doesn't meet these MUST NOT be
+configured, regardless of any other capability it offers. This repository cannot verify a
+specific provider's policy on your behalf, since the configured provider is an operator choice
+made outside the codebase.
+
 ## Deployment
 
 `render.yaml` defines a Render Blueprint (one free-tier web service per deployable) that

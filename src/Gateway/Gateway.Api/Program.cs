@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -9,6 +10,13 @@ using Microsoft.IdentityModel.Tokens;
 using Polly;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// FR-105: rejected before the body is even parsed — Kestrel itself returns 413 (via
+// BadHttpRequestException, already handled by GlobalExceptionHandler) once this is exceeded.
+// Mirrors ProductAdvisor.Api's own RequestGuardrails:MaxRequestBodyBytes default (Gateway has no
+// dependency on ProductAdvisor.Application to share the strongly-typed options record with).
+var maxRequestBodyBytes = builder.Configuration.GetValue("RequestGuardrails:MaxRequestBodyBytes", 64 * 1024L);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = maxRequestBodyBytes);
 
 builder.AddServiceDefaults();
 
@@ -219,6 +227,26 @@ app.MapGet("/api/chat/{sessionId:guid}", async (Guid sessionId, AdvisorApiClient
 {
     var snapshot = await advisor.GetSnapshotAsync(sessionId, ct);
     return snapshot is null ? Results.NotFound() : Results.Ok(snapshot.Value);
+});
+
+// DELETE /api/chat/{sessionId} — pass-through of user-initiated single-session deletion (FR-119).
+app.MapDelete("/api/chat/{sessionId:guid}", async Task<IResult> (Guid sessionId, AdvisorApiClient advisor, CancellationToken ct) =>
+{
+    var statusCode = await advisor.DeleteSessionAsync(sessionId, ct);
+    return statusCode switch
+    {
+        HttpStatusCode.NoContent => Results.NoContent(),
+        HttpStatusCode.Conflict => Results.Conflict("A turn for this session is already being processed."),
+        _ => Results.NotFound(),
+    };
+});
+
+// DELETE /api/chat — pass-through of user-initiated deletion of every one of the caller's
+// sessions (FR-119).
+app.MapDelete("/api/chat", async (AdvisorApiClient advisor, CancellationToken ct) =>
+{
+    await advisor.DeleteAllSessionsAsync(ct);
+    return Results.NoContent();
 });
 
 // GET /api/products/{productId} — plain product-detail composition (US3, outside the chat

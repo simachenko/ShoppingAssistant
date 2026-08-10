@@ -87,7 +87,15 @@ public sealed class ComputeTools(
         [Description("One or more product ids (guid) the user wants to buy")] IReadOnlyList<string> productIds,
         CancellationToken cancellationToken = default)
     {
-        var ids = productIds.Select(Guid.Parse).Distinct().ToList();
+        // FR-108: a malformed id is rejected rather than passed through (or crashing the call) —
+        // treated the same as "not found" below, alongside any id that parses but doesn't
+        // resolve to a real product.
+        var ids = productIds
+            .Select(id => Guid.TryParse(id, out var parsed) ? (Guid?)parsed : null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
 
         var details = await Task.WhenAll(ids.Select(id => catalogClient.GetProductDetailAsync(id, cancellationToken)));
         var resolvedIds = details.Where(d => d is not null).Select(d => d!.ProductId).ToList();

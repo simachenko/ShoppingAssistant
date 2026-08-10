@@ -14,6 +14,12 @@ using ProductAdvisor.Infrastructure.Tools;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// FR-105: rejected before the body is even parsed — Kestrel itself returns 413 (via
+// BadHttpRequestException, already handled by GlobalExceptionHandler) once this is exceeded.
+var maxRequestBodyBytes = builder.Configuration.GetValue(
+    $"{RequestGuardrailOptions.SectionName}:MaxRequestBodyBytes", new RequestGuardrailOptions().MaxRequestBodyBytes);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = maxRequestBodyBytes);
+
 builder.AddServiceDefaults();
 builder.AddNpgsqlDbContext<AdvisorDbContext>("advisordb");
 builder.AddAdvisorChatClient();
@@ -30,6 +36,9 @@ builder.Services.Configure<TurnResourceBudgetOptions>(builder.Configuration.GetS
 builder.Services.AddSingleton(sp =>
     sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<TurnResourceBudgetOptions>>().Value);
 builder.Services.AddScoped<TurnResourceBudgetGuard>();
+builder.Services.Configure<RequestGuardrailOptions>(builder.Configuration.GetSection(RequestGuardrailOptions.SectionName));
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RequestGuardrailOptions>>().Value);
 builder.Services.AddScoped<ConversationOrchestrator>();
 builder.Services.AddScoped<IConversationSessionRepository, ConversationSessionRepository>();
 builder.Services.AddSingleton<ConversationTurnGate>();
@@ -83,11 +92,19 @@ app.MapPost("/api/conversations/{sessionId:guid}/messages", async (
     IConversationSessionRepository repository,
     ConversationOrchestrator orchestrator,
     ConversationTurnGate turnGate,
+    RequestGuardrailOptions guardrailOptions,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.Text))
     {
         return Results.BadRequest("Message text is required.");
+    }
+
+    // FR-104/FR-107/FR-116: rejected before a turn is even started — before the session is even
+    // looked up, so a guardrail-doomed request never touches the turn gate either.
+    if (TryRejectByGuardrail(request.Text, guardrailOptions) is { } rejection)
+    {
+        return rejection;
     }
 
     var session = await repository.GetAsync(sessionId, ct);
@@ -112,11 +129,37 @@ app.MapPost("/api/conversations/{sessionId:guid}/messages", async (
 
         return Results.Ok(ConversationApiMapper.ToResponse(turnResult));
     }
+    catch (GuardrailRejectionException ex)
+    {
+        // FR-106: only detectable after extraction runs (it validates the extracted
+        // requirementPatch, not the raw message) — still zero tool calls made past this point.
+        return Results.Problem(detail: ex.Message, statusCode: ex.StatusCode);
+    }
     finally
     {
         turnGate.Exit(sessionId);
     }
 });
+
+// Shared pre-check (spec.md FR-104/FR-107/FR-116) for both the streaming and non-streaming
+// message endpoints — cheap and synchronous, so it runs before any session lookup, turn-gate
+// acquisition, or LLM call. FR-106 (requirementPatch list limits) can only be checked once
+// extraction has produced a patch, so it is not covered here — see each endpoint's own handling.
+static IResult? TryRejectByGuardrail(string rawMessage, RequestGuardrailOptions guardrailOptions)
+{
+    try
+    {
+        var normalized = InputValidationStage.ValidateAndNormalize(rawMessage, guardrailOptions);
+        var piiResult = PiiScreeningStage.Screen(normalized);
+        return piiResult is { Flagged: true, Action: "Blocked" }
+            ? Results.Problem(detail: "This message could not be processed.", statusCode: 400)
+            : null;
+    }
+    catch (GuardrailRejectionException ex)
+    {
+        return Results.Problem(detail: ex.Message, statusCode: ex.StatusCode);
+    }
+}
 
 // POST /api/conversations/{sessionId}/messages/stream — streaming sibling of the endpoint above
 // (FR-015, contracts/advisor-conversation-api.md): narration arrives as `token` SSE events, then
@@ -129,11 +172,21 @@ app.MapPost("/api/conversations/{sessionId:guid}/messages/stream", async Task<IR
     IConversationSessionRepository repository,
     ConversationOrchestrator orchestrator,
     ConversationTurnGate turnGate,
+    RequestGuardrailOptions guardrailOptions,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.Text))
     {
         return Results.BadRequest("Message text is required.");
+    }
+
+    // Checked here, before the SSE response starts (and headers commit to 200) — a guardrail
+    // exception raised later, inside the stream itself (e.g. FR-106, only detectable after
+    // extraction), can no longer become a clean status code; this pre-check is what makes the
+    // common guardrail cases (FR-104/FR-107/FR-116) still return one for the streaming endpoint.
+    if (TryRejectByGuardrail(request.Text, guardrailOptions) is { } rejection)
+    {
+        return rejection;
     }
 
     var session = await repository.GetAsync(sessionId, ct);
@@ -259,6 +312,58 @@ app.MapGet("/api/conversations/{sessionId:guid}", async (
 {
     var session = await repository.GetAsync(sessionId, ct);
     return IsOwnedBy(session, userId) ? Results.Ok(ConversationApiMapper.ToSnapshot(session!)) : Results.NotFound();
+});
+
+// DELETE /api/conversations/{sessionId} — user-initiated deletion of one session (FR-119).
+// Same ownership check and 404 as every other session-scoped endpoint; a turn already in flight
+// for this session is a 409, mirroring FR-024's own conflict response, rather than deleting out
+// from under an in-progress turn.
+app.MapDelete("/api/conversations/{sessionId:guid}", async (
+    Guid sessionId,
+    [FromHeader(Name = "X-User-Id")] string? userId,
+    IConversationSessionRepository repository,
+    ConversationTurnGate turnGate,
+    CancellationToken ct) =>
+{
+    var session = await repository.GetAsync(sessionId, ct);
+    if (!IsOwnedBy(session, userId))
+    {
+        return Results.NotFound();
+    }
+
+    if (!turnGate.TryEnter(sessionId))
+    {
+        return Results.Conflict("A turn for this session is already being processed.");
+    }
+
+    try
+    {
+        await repository.DeleteAsync(sessionId, ct);
+        return Results.NoContent();
+    }
+    finally
+    {
+        turnGate.Exit(sessionId);
+    }
+});
+
+// DELETE /api/conversations — user-initiated deletion of every one of the caller's sessions
+// (FR-119). No per-session turn-gate check here (there is no single sessionId to hold) — a turn
+// concurrently in flight for one of this user's sessions may still complete against
+// already-deleted state; this is the same class of race the per-session concurrency limit
+// (FR-110, not yet implemented) is meant to bound, not something this endpoint alone can close.
+app.MapDelete("/api/conversations", async (
+    [FromHeader(Name = "X-User-Id")] string? userId,
+    IConversationSessionRepository repository,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(userId))
+    {
+        return Results.Unauthorized();
+    }
+
+    await repository.DeleteAllForUserAsync(userId, ct);
+    return Results.NoContent();
 });
 
 app.Run();

@@ -132,7 +132,14 @@ public sealed class DataAccessTools(CatalogClient catalogClient, PricingClient p
             throw new ArgumentException("At most 50 productIds are allowed per call.", nameof(productIds));
         }
 
-        var ids = productIds.Select(Guid.Parse).ToList();
+        // FR-108: a malformed id is rejected rather than passed through (or crashing the call) —
+        // simply excluded from the outgoing query, the same as any other id Pricing has no
+        // record for.
+        var ids = productIds
+            .Select(id => Guid.TryParse(id, out var parsed) ? (Guid?)parsed : null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .ToList();
         return await pricingClient.GetOffersAsync(ids, cancellationToken);
     }
 }

@@ -106,8 +106,15 @@ public sealed class ExtractionStage(IChatClient chatClient)
         RequirementPatch = dto.RequirementPatch is null ? null : new RequirementPatch
         {
             Category = dto.RequirementPatch.Category,
-            Budget = dto.RequirementPatch.BudgetAmount is { } amount && dto.RequirementPatch.BudgetCurrency is { } currency
-                ? new Money(amount, currency)
+            // FR-108: a negative amount or an unrecognized currency is rejected rather than
+            // passed through — Budget simply stays null on the patch (the same shape as "not
+            // mentioned this turn"), which the deterministic merge either leaves as whatever was
+            // already known, or — if nothing valid was ever known — naturally routes to
+            // clarification via the existing missing-essential-information check. Never throws
+            // and crashes the turn on a malformed extracted value.
+            Budget = dto.RequirementPatch.BudgetAmount is { } amount
+                && Money.TryCreate(amount, dto.RequirementPatch.BudgetCurrency, out var money)
+                ? money
                 : null,
             RequiredFeatures = dto.RequirementPatch.RequiredFeatures,
             Preferences = dto.RequirementPatch.Preferences,

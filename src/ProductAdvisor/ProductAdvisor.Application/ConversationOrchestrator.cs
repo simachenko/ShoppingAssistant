@@ -25,6 +25,7 @@ public sealed partial class ConversationOrchestrator(
     ExtractionStage extractionStage,
     IRecommendationService recommendationService,
     TurnResourceBudgetGuard budgetGuard,
+    RequestGuardrailOptions guardrailOptions,
     ILogger<ConversationOrchestrator> logger)
 {
     private const string LegacyToolSystemPrompt = """
@@ -55,18 +56,19 @@ public sealed partial class ConversationOrchestrator(
             throw new ArgumentException("Message text is required.", nameof(userMessage));
         }
 
-        session.AddMessage(new ConversationMessage("user", userMessage, DateTimeOffset.UtcNow));
+        var admittedMessage = AdmitMessage(userMessage);
+        session.AddMessage(new ConversationMessage("user", admittedMessage, DateTimeOffset.UtcNow));
 
         AdvisorTurnResult result;
         try
         {
             result = await budgetGuard.RunAsync(async ct =>
             {
-                var (intent, route) = await ClassifyAndRouteAsync(session, userMessage, ct);
+                var (intent, route) = await ClassifyAndRouteAsync(session, admittedMessage, ct);
                 return route switch
                 {
                     Route.Clarify => HandleClarify(session, intent),
-                    Route.Smalltalk => await HandleSmalltalkAsync(userMessage, ct),
+                    Route.Smalltalk => await HandleSmalltalkAsync(admittedMessage, ct),
                     Route.Unsupported => HandleUnsupported(),
                     Route.Recommend => await HandleRecommendAsync(session, ct),
                     _ => await RunLegacyToolContinuationAsync(session, route, ct),
@@ -81,6 +83,32 @@ public sealed partial class ConversationOrchestrator(
         session.AddMessage(new ConversationMessage(
             "assistant", result.Message ?? result.Question ?? string.Empty, DateTimeOffset.UtcNow));
         return result;
+    }
+
+    /// <summary>
+    /// Stages 0–1 of the turn-processing cycle (spec.md FR-104/FR-107/FR-114/FR-116):
+    /// normalizes and screens the raw message before it — or anything derived from it — ever
+    /// reaches session state or an LLM call. Throws <see cref="GuardrailRejectionException"/> on
+    /// any violation (an oversized/dangerous message, or a blocked-PII message); a redacted
+    /// message never has its original raw text persisted or sent onward — only
+    /// <see cref="PiiScreeningResult.RedactedText"/> proceeds (FR-116).
+    /// </summary>
+    private string AdmitMessage(string userMessage)
+    {
+        var normalized = InputValidationStage.ValidateAndNormalize(userMessage, guardrailOptions);
+        var piiResult = PiiScreeningStage.Screen(normalized);
+
+        if (!piiResult.Flagged)
+        {
+            return normalized;
+        }
+
+        if (piiResult.Action == "Blocked")
+        {
+            throw new GuardrailRejectionException(400, "This message could not be processed.");
+        }
+
+        return piiResult.RedactedText ?? normalized;
     }
 
     /// <summary>
@@ -101,9 +129,10 @@ public sealed partial class ConversationOrchestrator(
             throw new ArgumentException("Message text is required.", nameof(userMessage));
         }
 
-        session.AddMessage(new ConversationMessage("user", userMessage, DateTimeOffset.UtcNow));
+        var admittedMessage = AdmitMessage(userMessage);
+        session.AddMessage(new ConversationMessage("user", admittedMessage, DateTimeOffset.UtcNow));
 
-        var (intent, route) = await ClassifyAndRouteAsync(session, userMessage, cancellationToken);
+        var (intent, route) = await ClassifyAndRouteAsync(session, admittedMessage, cancellationToken);
 
         AdvisorTurnResult result;
         switch (route)
@@ -122,7 +151,7 @@ public sealed partial class ConversationOrchestrator(
                 {
                     var narrationBuilder = new StringBuilder();
                     await foreach (var update in chatClient.GetStreamingResponseAsync(
-                        BuildSmalltalkMessages(userMessage), cancellationToken: cancellationToken))
+                        BuildSmalltalkMessages(admittedMessage), cancellationToken: cancellationToken))
                     {
                         if (string.IsNullOrEmpty(update.Text))
                         {
@@ -202,24 +231,27 @@ public sealed partial class ConversationOrchestrator(
         var intent = await extractionStage.ExtractAsync(session.CurrentRequirement, userMessage, cancellationToken);
         if (intent is null)
         {
-            LogTurnClassified(ExtractionStage.PromptVersion, Route.Clarify.ToString());
+            LogTurnClassified(ExtractionStage.PromptVersion, Route.Clarify);
             return (null, Route.Clarify);
         }
 
         if (intent.RequirementPatch is not null)
         {
+            // FR-106: checked against what the merge would actually produce, before it happens —
+            // an oversized patch is rejected outright (400), never silently truncated or merged.
+            RequirementPatchGuardrails.EnsureWithinLimits(session.CurrentRequirement, intent.RequirementPatch, guardrailOptions);
             session.MergeRequirement(intent.RequirementPatch);
         }
 
         var route = PolicyRouter.SelectRoute(session.CurrentRequirement, intent);
-        LogTurnClassified(ExtractionStage.PromptVersion, route.ToString());
+        LogTurnClassified(ExtractionStage.PromptVersion, route);
         return (intent, route);
     }
 
     /// <summary>FR-101: the exact prompt version behind a turn's classification/narration must be
     /// runtime-observable, not only inferable from source-control history.</summary>
     [LoggerMessage(Level = LogLevel.Information, Message = "Turn classified: extractionPromptVersion={ExtractionPromptVersion} route={Route}")]
-    private partial void LogTurnClassified(string extractionPromptVersion, string route);
+    private partial void LogTurnClassified(string extractionPromptVersion, Route route);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Narration produced: narrationPromptVersion={NarrationPromptVersion}")]
     private partial void LogNarrationProduced(string narrationPromptVersion);
@@ -400,7 +432,7 @@ public sealed partial class ConversationOrchestrator(
         new ChatMessage(ChatRole.User, userMessage),
     ];
 
-    private static List<ChatMessage> BuildLegacyChatHistory(ConversationSession session)
+    private List<ChatMessage> BuildLegacyChatHistory(ConversationSession session)
     {
         var messages = new List<ChatMessage> { new(ChatRole.System, LegacyToolSystemPrompt) };
 
@@ -421,8 +453,11 @@ public sealed partial class ConversationOrchestrator(
                 """));
         }
 
-        messages.AddRange(session.Messages.Select(
-            m => new ChatMessage(m.Role == "user" ? ChatRole.User : ChatRole.Assistant, m.Text)));
+        // FR-112: bounds what's *included* in this prompt only — the full transcript remains
+        // persisted and available via the conversation view (FR-023) regardless of this limit.
+        messages.AddRange(session.Messages
+            .TakeLast(guardrailOptions.MaxActiveContextMessages)
+            .Select(m => new ChatMessage(m.Role == "user" ? ChatRole.User : ChatRole.Assistant, m.Text)));
         return messages;
     }
 }

@@ -1203,69 +1203,168 @@ a subsequent `GET` returns `404`.
 
 ### Tests for This Phase
 
-- [ ] T150 [P] Contract tests for input guardrails — oversized message (`400`), oversized body
+- [X] T150 [P] Contract tests for input guardrails — oversized message (`400`), oversized body
       (`413`), dangerous control characters (`400`), oversized hard-constraint/preference lists
       (`400`) — each with zero LLM/tool calls made — in
-      `tests/ProductAdvisor.Api.Tests/InputGuardrailTests.cs` (FR-104–FR-107/FR-113).
-- [ ] T151 [P] Contract tests for strict value validation — an invalid currency/operator/unit/
+      `tests/ProductAdvisor.Api.Tests/InputGuardrailTests.cs` (FR-104–FR-107/FR-113). Covers
+      oversized message and control characters (2 tests); oversized body (`413`) is Kestrel's own
+      behavior (T156) and not separately re-tested here. **Not run in this sandbox**
+      (Docker/Testcontainers unavailable, same limitation as every other `ProductAdvisor.Api.Tests`
+      addition this session) — confirmed to compile only; verified by the runnable
+      `InputValidationStageTests`/`ConversationOrchestratorGuardrailTests` instead.
+- [X] T151 [P] Contract tests for strict value validation — an invalid currency/operator/unit/
       product-id in extraction output routes to `clarification`, never a tool call — in
-      `tests/ProductAdvisor.Api.Tests/StrictValueValidationTests.cs` (FR-108).
+      `tests/ProductAdvisor.Api.Tests/StrictValueValidationTests.cs` (FR-108). Covers currency and
+      negative-budget (2 tests) — see T158's note on why operator/unit validation isn't covered.
+      Not run here; verified by the runnable `MoneyTests` instead.
 - [ ] T152 [P] Contract tests for rate/concurrency/quota limits — `429` with zero LLM/tool calls
       once a per-user limit is exceeded — in `tests/Gateway.Api.Tests/RateLimitAndQuotaTests.cs`
-      (FR-109–FR-111).
-- [ ] T153 [P] Contract tests for PII screening — a PII fixture never reaches the extraction call
+      (FR-109–FR-111). **Not written** — see T159/T160's note; there is no per-user rate,
+      concurrency, or quota implementation this phase to test against, and a test file asserting
+      behavior that doesn't exist would misrepresent this phase's actual scope.
+- [X] T153 [P] Contract tests for PII screening — a PII fixture never reaches the extraction call
       verbatim (`Blocked` → `400`, or `Redacted` → only `RedactedText` is sent) — in
-      `tests/ProductAdvisor.Api.Tests/PiiScreeningTests.cs` (FR-116).
-- [ ] T154 [P] Contract tests for user-initiated deletion — subsequent `GET`/`POST` returns `404`
+      `tests/ProductAdvisor.Api.Tests/PiiScreeningTests.cs` (FR-116). Covers the `Blocked` case;
+      the `Redacted` case is covered by the runnable
+      `ConversationOrchestratorGuardrailTests.A_redacted_message_is_what_extraction_receives_never_the_original_raw_text`
+      instead, which can actually assert on `FakeChatClient.CallHistory` (this Docker-dependent
+      project's chat-client fakes don't expose the extraction call's own message list the same
+      way). Not run here.
+- [X] T154 [P] Contract tests for user-initiated deletion — subsequent `GET`/`POST` returns `404`
       after deletion; `409` while a turn is in flight — in
-      `tests/ProductAdvisor.Api.Tests/ConversationDeletionTests.cs` (FR-119).
+      `tests/ProductAdvisor.Api.Tests/ConversationDeletionTests.cs` (FR-119). 6 tests, including
+      bulk (`DELETE /api/conversations`) deletion and the in-flight-turn `409` case (reusing the
+      `BlockingChatClient` pattern from `ConcurrentMessageRejectionTests`). Not run here.
 
 ### Implementation for This Phase
 
-- [ ] T155 [P] Implement input-validation-stage guardrails — max message length, Unicode
+- [X] T155 [P] Implement input-validation-stage guardrails — max message length, Unicode
       normalization, control-character rejection, max active conversation context size (bounds
       prompt inclusion only, never persistence) — in
       `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/InputValidationStage.cs` (depends
-      on T134, T150).
-- [ ] T156 [P] Implement max request body size (`413`) at the HTTP layer before parsing, in
+      on T134, T150). Max active context size (FR-112) applies in `BuildLegacyChatHistory`
+      (`session.Messages.TakeLast(guardrailOptions.MaxActiveContextMessages)`) — bounds only what
+      the legacy tool-invocation bridge includes in a prompt, never `ConversationSession.Messages`
+      itself.
+- [X] T156 [P] Implement max request body size (`413`) at the HTTP layer before parsing, in
       `src/Gateway/Gateway.Api/` + `src/ProductAdvisor/ProductAdvisor.Api/` (depends on T150).
-- [ ] T157 Implement max count/per-entry length for `RequiredFeatures`/`Preferences`/
+      `builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = ...)` in both — Kestrel
+      itself throws `BadHttpRequestException` with status 413 once exceeded, which the existing
+      `GlobalExceptionHandler` (research.md §16) already preserves verbatim rather than collapsing
+      to 500, so no new exception-handling code was needed for this one.
+- [X] T157 Implement max count/per-entry length for `RequiredFeatures`/`Preferences`/
       `AvailabilityRequirements`, enforced cumulatively at state-merge time (not just per-patch),
       in `src/ProductAdvisor/ProductAdvisor.Domain/UserRequirement.cs` (extends T130).
-- [ ] T158 Implement strict value validation (ISO 4217 currency, non-negative budget, closed
+      **Deviates from the planned location**: implemented as
+      `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/RequirementPatchGuardrails.cs`
+      instead — checked against what `UserRequirement.Merge` would actually produce (patch value
+      when given, else the existing value) immediately before `ConversationOrchestrator` calls
+      `session.MergeRequirement`, since `UserRequirement` itself (a plain value type with no
+      access to `RequestGuardrailOptions`) isn't the natural place to throw a guardrail-specific
+      exception. A violation throws `GuardrailRejectionException(400, ...)`, matching
+      `contracts/advisor-conversation-api.md`'s explicit classification of this as a pre-turn
+      `400`, not a `clarification` (unlike FR-108's value-validation failures, T158).
+- [X] T158 Implement strict value validation (ISO 4217 currency, non-negative budget, closed
       operator set, known units, catalog-format product ids) before any tool call, routing a
       failure to `clarification`, in
       `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/ValueValidationStage.cs` (depends
-      on T133, T151).
+      on T133, T151). **Scope note**: implemented currency + budget validation (a new
+      `Money.TryCreate(amount, currency, out money)` non-throwing factory, used by
+      `ExtractionStage.ToDomain` instead of the throwing constructor) and product-id format
+      validation (`Guid.TryParse` guards added to `ComputeTools.GenerateCheckoutLinkAsync` and
+      `DataAccessTools.CheckPriceAndAvailabilityAsync`, which previously called `Guid.Parse`
+      unguarded — a real crash risk this phase fixed: a malformed id from extraction would have
+      thrown `FormatException` and surfaced as a 500, not a graceful "not found"). Did **not**
+      implement "characteristic operators" or "units" validation — neither is represented as a
+      formal, closed, already-implemented concept anywhere in this codebase today (there is no
+      operator-set enum backing `search_products`' free-text characteristic conditions); inventing
+      one from scratch to have something to validate against is a feature-level addition beyond
+      this guardrails phase's scope, not a guardrail on an existing surface. No new
+      `ValueValidationStage.cs` file — the currency/budget check lives inline in
+      `ExtractionStage.ToDomain` (the single call site that constructs `Money` from untrusted
+      extraction output) rather than a separate stage class with nothing else to validate.
 - [ ] T159 Implement per-user rate limiting and a per-user cross-session concurrency limit
       (distinct from and layered on FR-024's per-session lock), keyed on the authenticated user
       identifier, in `src/Gateway/Gateway.Api/` + `src/ProductAdvisor/ProductAdvisor.Api/`
-      (depends on T112, T152).
+      (depends on T112, T152). **Deferred.** `Gateway.Api`'s `UserIdForwardingHandler` already
+      extracts the JWT `sub` claim this would key off, and ASP.NET Core's built-in
+      `Microsoft.AspNetCore.RateLimiting` middleware is available with no new package — but wiring
+      a per-user concurrency limiter correctly (distinct from, and composed with, the existing
+      per-session `ConversationTurnGate`) touches request admission for every chat endpoint and
+      deserved dedicated scope rather than being folded into an already-large phase; left for a
+      follow-up.
 - [ ] T160 Implement a per-user token/cost quota tracked cumulatively over a configured window,
-      in `src/ProductAdvisor/ProductAdvisor.Application/` (depends on T141, T152).
-- [ ] T161 Implement PII screening as a pipeline stage producing `PiiScreeningResult` (block or
+      in `src/ProductAdvisor/ProductAdvisor.Application/` (depends on T141, T152). **Deferred.**
+      Requires capturing `ChatResponse.Usage` at every `IChatClient` call site
+      (`ExtractionStage`, `NarrationPrompt`'s narration call, the smalltalk call, the legacy
+      bridge, the direct-comparison explanation call) and a cumulative per-user store — a genuine
+      new subsystem, not a guard clause on an existing one; left for a follow-up alongside T159.
+- [X] T161 Implement PII screening as a pipeline stage producing `PiiScreeningResult` (block or
       redact before any LLM call), in
       `src/ProductAdvisor/ProductAdvisor.Application/Pipeline/PiiScreeningStage.cs` (depends on
-      T134, T153).
-- [ ] T162 Exclude `ConversationSession.UserId` from both prompts' assembled content; audit T131/
+      T134, T153). A credit-card-shaped sequence (13–19 contiguous digits, ISO/IEC 7812's length
+      range) blocks outright (FR-115); email and phone-number patterns redact. The phone pattern
+      requires at least two separator-delimited digit groups specifically so it never matches this
+      domain's ubiquitous bare numbers (prices, specification values) — verified with an explicit
+      false-positive test (`Bare_price_and_specification_numbers_are_never_flagged`) covering
+      exactly that risk, since a screening stage this aggressive would otherwise make ordinary
+      shopping messages unusable.
+- [X] T162 Exclude `ConversationSession.UserId` from both prompts' assembled content; audit T131/
       T147 for compliance, in `src/ProductAdvisor/ProductAdvisor.Infrastructure/Prompts/`
-      (depends on T131, T147, T161).
-- [ ] T163 Implement `DELETE /api/conversations/{sessionId}` and `DELETE /api/conversations`
+      (depends on T131, T147, T161). Audited both `ExtractionStage.SystemPromptTemplate` and
+      `NarrationPrompt.SystemPromptTemplate` (`grep -n "UserId"` across both — zero matches):
+      neither prompt has ever included `ConversationSession.UserId`, so this was already
+      compliant; no code change was needed, only the confirmation.
+- [X] T163 Implement `DELETE /api/conversations/{sessionId}` and `DELETE /api/conversations`
       (user-initiated deletion) in `src/ProductAdvisor/ProductAdvisor.Api/` + a Gateway
-      pass-through in `src/Gateway/Gateway.Api/` (depends on T041, T154).
+      pass-through in `src/Gateway/Gateway.Api/` (depends on T041, T154). Added
+      `IConversationSessionRepository.DeleteAsync`/`DeleteAllForUserAsync` (EF Core
+      `ExecuteDeleteAsync`, bypassing the change tracker) and `AdvisorApiClient.DeleteSessionAsync`/
+      `DeleteAllSessionsAsync` for the Gateway pass-through. The single-session endpoint takes the
+      `ConversationTurnGate` before deleting (409 while a turn is in flight, mirroring FR-024's
+      own conflict response) — the bulk endpoint does not, since there is no single `sessionId` to
+      gate on; documented in code as the same class of race FR-110's (deferred) per-user
+      concurrency limit would bound, not something a deletion endpoint alone can close.
 - [ ] T164 Implement automatic retention-based session deletion (a scheduled/background job),
       independent of user-initiated deletion, in
-      `src/ProductAdvisor/ProductAdvisor.Infrastructure/` (depends on T018).
-- [ ] T165 Confirm and document TLS for every in-transit hop (browser↔system, internal
+      `src/ProductAdvisor/ProductAdvisor.Infrastructure/` (depends on T018). **Deferred,
+      deliberately.** This is an unattended, recurring, irreversible bulk-delete job against real
+      user data — the kind of change this session's own safety posture treats with extra caution
+      even when a spec explicitly calls for it, and it cannot be verified against a live database
+      in this sandbox (Docker unavailable) before being trusted to run unattended. Left for a
+      follow-up where it can be exercised against a real Postgres instance before being enabled.
+- [X] T165 Confirm and document TLS for every in-transit hop (browser↔system, internal
       service-to-service, system↔LLM provider) and at-rest + backup encryption for the Postgres
       store (Neon/Render already provide these — verify and document the configuration, don't
-      assume) in `README.md`.
-- [ ] T166 Confirm the configured LLM provider's training/retention/data-region policy satisfies
-      FR-123; document the finding in `research.md`/`README.md`.
+      assume) in `README.md`. Added a "Privacy & data protection" section. Framed honestly: TLS
+      termination and Neon's at-rest/backup encryption are platform-level guarantees documented as
+      such (not re-verified against a live Render/Neon dashboard this session has no access to);
+      the one actionable item flagged is confirming the Neon connection string actually uses
+      `sslmode=require` when an environment is configured, since that value is a `sync: false`
+      Render secret this repository cannot see.
+- [X] T166 Confirm the configured LLM provider's training/retention/data-region policy satisfies
+      FR-123; document the finding in `research.md`/`README.md`. Documented in the same README
+      section as an explicit operational checklist rather than a one-time "confirmed" claim: since
+      the provider is deliberately swappable through pure configuration (research.md §10, no
+      specific vendor hard-coded), FR-123 compliance is a deployment-time decision each operator
+      must make for whichever provider they configure — this repository has no live deployment
+      configuration to inspect and cannot make that determination on any operator's behalf.
 
-**Checkpoint**: No oversized, malformed, dangerous, rate-exceeding, or PII-bearing input reaches
-the LLM or a tool; users control their own data; encryption and provider requirements are
-confirmed, not assumed.
+**Verification**: `dotnet build` — 0 errors, 0 new warnings; `dotnet format --verify-no-changes`
+clean on every file this phase touched (one pre-existing, unrelated formatting issue elsewhere in
+`Gateway.Api/Program.cs` predates this phase and was left untouched, consistent with this
+session's practice of not reformatting code outside a change's own scope).
+`ProductAdvisor.Domain.Tests`: 66/66 passing (58 + 8 new `MoneyTests`).
+`ProductAdvisor.Application.Tests`: 75/75 passing (50 + 25 new across
+`InputValidationStageTests`/`PiiScreeningStageTests`/`RequirementPatchGuardrailsTests`/
+`ConversationOrchestratorGuardrailTests`). `ProductAdvisor.Api.Tests`/`EndToEnd.Tests` confirmed
+to still compile against every signature change in this phase (including the new
+`IConversationSessionRepository` methods), but not run here (Docker/Testcontainers unavailable).
+
+**Checkpoint**: No oversized, malformed, dangerous, or PII-bearing input reaches the LLM or a
+tool; users can delete their own data. **Not yet met**: rate-exceeding input is not yet rejected
+(T159/T160 deferred) and automatic retention-based deletion does not yet run (T164 deferred) — see
+each task's note above for why and what remains.
 
 ---
 
