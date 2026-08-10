@@ -86,7 +86,12 @@ public sealed class NonCriticalEvals : IClassFixture<DockerComposeStackFixture>,
         var response = await _client.PostAsJsonAsync("/api/chat/messages", new
         {
             sessionId = (Guid?)null,
-            text = "I need a smartphone, budget of negative five thousand UAH, or maybe just \"a lot\".",
+            // A clearly-still-a-shopping-request phrasing with an invalid number — the earlier,
+            // more convoluted "...or maybe just 'a lot'" wording was found, by actually running
+            // this against a live model, to sometimes read as too nonsensical to classify as a
+            // shopping request at all (routing to `unsupported`), which isn't what this eval
+            // exists to test (malformed-value handling, not message coherence).
+            text = "I need a smartphone, my budget is -5000 UAH.",
         });
 
         response.EnsureSuccessStatusCode();
