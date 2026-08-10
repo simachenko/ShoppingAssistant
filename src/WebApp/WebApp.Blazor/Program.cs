@@ -35,7 +35,6 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddCascadingAuthenticationState();
 
-builder.Services.AddScoped<CurrentUserTokenProvider>();
 builder.Services.AddTransient<BearerTokenHandler>();
 
 // Add services to the container.

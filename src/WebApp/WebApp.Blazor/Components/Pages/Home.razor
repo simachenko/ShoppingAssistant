@@ -4,6 +4,7 @@
 @using WebApp.Blazor.Rendering
 @using WebApp.Blazor.Services
 @inject GatewayApiClient GatewayApi
+@inject ILogger<Home> Logger
 
 <PageTitle>Smart Product Advisor</PageTitle>
 
@@ -200,11 +201,17 @@
             var turn = await TryStreamingAsync(message) ?? await GatewayApi.SendMessageAsync(_sessionId, message, CancellationToken.None);
             ApplyTurnResult(turn);
         }
-        catch (Exception)
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            Logger.LogWarning(ex, "Gateway rejected the chat request because the sign-in token is missing, invalid, or expired.");
+            _errorMessage = "Your sign-in session has expired. Please sign out and sign in again.";
+        }
+        catch (Exception ex)
         {
             // Honest partial response at the UI layer too (constitution Principle V): a
             // downstream outage must not crash the chat, it must say so.
             _errorMessage = "Sorry, the advisor isn't reachable right now. Please try again shortly.";
+            Logger.LogError(ex, "Chat request failed after both streaming and non-streaming attempts.");
         }
         finally
         {
@@ -243,8 +250,9 @@
 
             return result;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.LogWarning(ex, "Streaming chat failed; falling back to the non-streaming endpoint.");
             return null;
         }
     }
