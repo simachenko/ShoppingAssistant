@@ -71,6 +71,30 @@ dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj
 docker compose down -v
 ```
 
+### Agentic security and quality evals
+
+`tests/EndToEnd.Tests/Evals/` holds the mandatory fifteen-class eval suite (spec.md
+FR-138–FR-141, data-model.md `EvalSuite`) — each class verifies a guarantee this system already
+makes elsewhere against the real, running stack; the suite defines no new behavior of its own,
+only test coverage over existing requirements (research.md §33). CI (`.github/workflows/ci.yml`,
+`agentic-evals` job) splits it in two:
+
+- **`CriticalEvals.cs`** (6 classes — grounding, authorization, cross-session access) **gates the
+  build at 100%**. Each is backed by a deterministic application-layer check — the Evidence
+  Envelope's allowed-claims check (FR-088), the tool-exposure surface scoped per route before the
+  model is invoked (FR-068), a plain session-ownership comparison (FR-031) — not model judgment,
+  so a failure here means the deterministic enforcement itself regressed, not that "the model
+  behaved unpredictably."
+- **`NonCriticalEvals.cs`** (the other 9 classes) run on every build and are reviewed, but never
+  block one. Each has a genuine model-behavior component under adversarial/ambiguous input — even
+  with every deterministic guard already in place, the model's specific wording can vary in ways
+  that don't compromise a hard guarantee but could still flap a narrowly-written assertion.
+
+This split is spec.md's own Assumptions, recorded there explicitly as a documented, revisable
+judgment call rather than an implicit one — see spec.md's Assumptions and research.md §33 for the
+full rationale, including why PII/payment-data input (class 15) was *not* promoted to critical
+despite FR-115/FR-116 already being hard requirements regardless of which tier verifies them.
+
 ## Documentation
 
 - [`specs/001-smart-product-advisor/spec.md`](specs/001-smart-product-advisor/spec.md) — feature requirements and success criteria

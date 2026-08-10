@@ -54,7 +54,7 @@ public class ObservabilityFieldShapeTests
         {
             // PromptVersion legitimately contains "prompt" — it's a version identifier (FR-101),
             // not the prompt content itself; excluded from this fragment check by name.
-            if (propertyName == nameof(TurnLogFields.PromptVersion).ToLowerInvariant())
+            if (string.Equals(propertyName, nameof(TurnLogFields.PromptVersion), StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

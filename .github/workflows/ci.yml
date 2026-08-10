@@ -95,7 +95,59 @@ jobs:
           global-json-file: global.json
 
       - name: Run EndToEnd scenario tests
-        run: dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj --configuration Release
+        # Excludes the Evals namespace — those run in the dedicated agentic-evals job below,
+        # split into critical (build-gating) and non-critical (reported only) so a non-critical
+        # eval's LLM-wording flake never blocks a merge the way a scenario-test regression should.
+        run: dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj --configuration Release --filter "FullyQualifiedName!~EndToEnd.Tests.Evals"
+
+      - name: Tear down the stack
+        if: always()
+        run: docker compose down -v
+
+  # Phase 14 (spec.md FR-138-FR-141, data-model.md EvalSuite, research.md §33): the fifteen-class
+  # agentic security/quality eval suite. A distinct job (not more steps inside end-to-end above)
+  # specifically so its critical-class gate is independent of the broader scenario suite's own
+  # pass/fail, and so it can run in parallel with end-to-end (both depend only on
+  # docker-image-validation, and GitHub Actions jobs run on isolated runners, so two concurrent
+  # docker-compose stacks don't collide on ports).
+  agentic-evals:
+    runs-on: ubuntu-latest
+    needs: docker-image-validation
+    # Same live-LLM caveat as the end-to-end job above: these evals hit a real, non-deterministic
+    # model. The six CriticalEvals are still expected to hold at 100% regardless (research.md
+    # §33 — each is backed by a deterministic application-layer check, not model judgment); the
+    # nine NonCriticalEvals are not, hence the split below.
+    env:
+      LLM_PROVIDER_ENDPOINT: ${{ secrets.LLM_PROVIDER_ENDPOINT }}
+      LLM_PROVIDER_API_KEY: ${{ secrets.LLM_PROVIDER_API_KEY }}
+      LLM_PROVIDER_MODEL: ${{ secrets.LLM_PROVIDER_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up the full stack
+        run: docker compose up --build -d
+
+      - name: Wait for services to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5100/health > /dev/null; then
+              echo "Gateway healthy"; break
+            fi
+            sleep 5
+          done
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Run critical evals (release-blocking — grounding, authorization, cross-session)
+        run: dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj --configuration Release --filter "FullyQualifiedName~EndToEnd.Tests.Evals.CriticalEvals"
+
+      - name: Run non-critical evals (reported, never blocks the build)
+        if: always()
+        continue-on-error: true
+        run: dotnet test tests/EndToEnd.Tests/EndToEnd.Tests.csproj --configuration Release --filter "FullyQualifiedName~EndToEnd.Tests.Evals.NonCriticalEvals"
 
       - name: Tear down the stack
         if: always()

@@ -1535,24 +1535,77 @@ breaking one deliberately), and does not fail the build for a non-critical-class
 
 ### Tasks
 
-- [ ] T176 [P] Author evals for the six critical classes — indirect injection via product/spec,
+- [X] T176 [P] Author evals for the six critical classes — indirect injection via product/spec,
       fabricated prices/specs/availability, product not found (grounding); wrong tool for intent,
       system-prompt extraction attempt (authorization); cross-session access — in
-      `tests/EndToEnd.Tests/Evals/CriticalEvals.cs` (depends on Phases 9–13; FR-138–FR-140).
-- [ ] T177 [P] Author evals for the nine non-critical classes — direct prompt injection,
+      `tests/EndToEnd.Tests/Evals/CriticalEvals.cs` (depends on Phases 9–13; FR-138–FR-140). Every
+      assertion targets the *deterministic mechanism* behind each class (the Evidence Envelope's
+      canonical data, the tool-exposure surface, the session-ownership comparison) rather than
+      narration wording alone — per research.md §33, this is what makes a 100% bar realistic for
+      this set. The indirect-injection eval (class 2) has one honestly-documented constraint:
+      seed data is fixed and shared across every E2E test, so it can't be mutated in-place to
+      embed an injection string without affecting unrelated tests; the eval instead smuggles the
+      attempted instruction through the user message, framed as quoting the product listing — the
+      grounding check doesn't care which channel a claim arrived through, only whether it's in
+      the Envelope, so this still exercises the same mechanism. The cross-session eval targets
+      the Phase 12 deletion endpoints specifically (a different angle than the existing
+      `AccessControlAndCheckoutScenarioTests`, which only covers read access).
+- [X] T177 [P] Author evals for the nine non-critical classes — direct prompt injection,
       tool-loop exhaustion, malformed tool arguments, oversized input, memory poisoning,
       constraint changes between turns, partial dependency failure, unsupported intent,
       PII/payment-data input — in `tests/EndToEnd.Tests/Evals/NonCriticalEvals.cs` (depends on
-      Phases 9–13; FR-138/FR-141).
-- [ ] T178 Wire the eval suite into `.github/workflows/ci.yml` as a distinct job — failing the
+      Phases 9–13; FR-138/FR-141). The tool-loop-exhaustion eval is honestly scoped down: reliably
+      forcing the exact resource-budget ceiling via natural language against a real model isn't
+      deterministically constructible (the model may simply resolve the request in fewer steps
+      than intended), so it asserts the still-meaningful bar — the turn resolves to *some* typed
+      result within a generous bound, never a hang — and points to `TurnResourceBudgetTests`
+      (`ProductAdvisor.Application.Tests`, a scripted chat client that *can* force the exact
+      condition) as what actually verifies the budget's own fail-safe deterministically. The
+      partial-dependency-failure eval exercises a Catalog outage during a product lookup — a
+      different dependency/scenario pairing than the existing `PartialFailureResilienceTests`
+      (Pricing outage during a recommendation) — so the same "honest partial response" guarantee
+      is checked against a second, independent case rather than duplicating the first.
+- [X] T178 Wire the eval suite into `.github/workflows/ci.yml` as a distinct job — failing the
       build on any critical-class (T176) failure, reporting but not failing the build on a
       non-critical-class (T177) failure — in `.github/workflows/ci.yml` (depends on T176, T177).
-- [ ] T179 Document the critical/non-critical categorization and its rationale in `README.md`,
-      cross-referencing spec.md's Assumptions and research.md §33 (depends on T178).
+      A new `agentic-evals` job, parallel to (not serialized after) the existing `end-to-end` job
+      — both depend only on `docker-image-validation`, and GitHub Actions runs each job on its
+      own isolated runner, so two concurrent docker-compose stacks don't collide on ports. Two
+      `dotnet test --filter` steps: `CriticalEvals` (plain — a non-zero exit fails the job, which
+      is a required check) then `NonCriticalEvals` (`continue-on-error: true` — always runs,
+      never fails the job). Also scoped the pre-existing `end-to-end` job's own test step to
+      exclude the new `Evals` namespace (`--filter "FullyQualifiedName!~EndToEnd.Tests.Evals"`),
+      so the eval classes run exactly once (in their dedicated job with the correct critical/
+      non-critical treatment) rather than a second, undifferentiated time inside `end-to-end` too.
+      YAML syntax validated (`python3 -c "import yaml; yaml.safe_load(...)"`) — the workflow
+      itself could not be run end-to-end here (no GitHub Actions runner in this sandbox, and the
+      jobs require Docker either way).
+- [X] T179 Document the critical/non-critical categorization and its rationale in `README.md`,
+      cross-referencing spec.md's Assumptions and research.md §33 (depends on T178). Added an
+      "Agentic security and quality evals" subsection under Testing, in the same terse voice as
+      the rest of the README, including the specific example research.md §33 itself highlights
+      (PII/payment-data input, class 15, deliberately *not* promoted to critical despite
+      FR-115/FR-116 already being hard requirements regardless of tier).
+
+**Verification**: `dotnet build` (full solution) — 0 errors, 0 new warnings (also fixed one
+latent CA1862 warning in Phase 13's `ObservabilityFieldShapeTests.cs`, caught only by a
+full-solution build, not the filtered single-project builds used at the time). `dotnet format
+--verify-no-changes` clean on every file this phase touched. `ProductAdvisor.Domain.Tests`:
+66/66 passing (unchanged). `ProductAdvisor.Application.Tests`: 86/86 passing (unchanged — this
+phase added no Application-layer code). The two new `Evals` files compile cleanly
+(`dotnet build tests/EndToEnd.Tests/EndToEnd.Tests.csproj`) but — like every other
+`EndToEnd.Tests`/Docker-dependent addition across every phase of this session — could not be run:
+they require the full `docker compose up` stack plus a real, configured LLM provider, neither
+available in this sandbox. This is the one phase where *no* part of the new work could be
+empirically verified running (unlike Phases 12/13, which each had at least a few genuinely
+Docker-free tests) — flagged explicitly rather than left implicit.
 
 **Checkpoint**: Every guarantee this specification makes about prompt injection, grounding,
-authorization, cross-session isolation, resource exhaustion, and PII handling is verified by an
-automated, CI-gated eval, not merely documented.
+authorization, cross-session isolation, resource exhaustion, and PII handling now has a
+corresponding automated eval, wired into CI with the correct release-gating treatment — written
+and reviewed, but unverified running in this sandbox; running the full `agentic-evals` job for
+the first time (with real `LLM_PROVIDER_*` secrets configured) is the natural next step before
+trusting it as a release gate in practice.
 
 ---
 
