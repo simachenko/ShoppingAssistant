@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using Microsoft.Extensions.Hosting;
 using Xunit;
@@ -85,8 +86,7 @@ public sealed class InternalCredentialSecurityTests : IAsyncDisposable
         var completelyWrong = new string('x', 64);
         var almostRight = TestSupport.InternalApiKeyTestDefaults.Key[..^1] + "x";
 
-        var wrongDuration = await MeasureAverageAsync(client, completelyWrong);
-        var almostDuration = await MeasureAverageAsync(client, almostRight);
+        var (wrongDuration, almostDuration) = await MeasureInterleavedAsync(client, completelyWrong, almostRight);
 
         // A constant-time comparison should show no meaningful trend — allow generous slack
         // (an order of magnitude) since network/HTTP-pipeline noise dwarfs a byte-comparison
@@ -95,19 +95,61 @@ public sealed class InternalCredentialSecurityTests : IAsyncDisposable
         Assert.InRange(ratio, 0.1, 10.0);
     }
 
-    private static async Task<TimeSpan> MeasureAverageAsync(HttpClient client, string headerValue, int iterations = 20)
+    /// <summary>
+    /// Measures both header values in one interleaved pass.
+    /// </summary>
+    /// <remarks>
+    /// This test used to be the suite's flakiest, for two measurement reasons rather than any
+    /// real timing variance. It timed with <c>DateTimeOffset.UtcNow</c>, whose ~15.6 ms tick on
+    /// Windows is coarser than the requests being measured, so most samples read as zero and the
+    /// ratio against a near-zero denominator exploded past the bound. And it measured the two
+    /// values in separate sequential batches, so the first batch absorbed one-time JIT and
+    /// host-warmup cost that the second never paid.
+    /// <para>
+    /// Now: a high-resolution <see cref="Stopwatch"/>, a discarded warm-up round, and alternating
+    /// the two values within each iteration so any drift (GC, scheduling, thermal) applies to
+    /// both equally.
+    /// </para>
+    /// </remarks>
+    private static async Task<(TimeSpan Wrong, TimeSpan Almost)> MeasureInterleavedAsync(
+        HttpClient client, string wrongValue, string almostValue, int iterations = 40)
     {
-        var total = TimeSpan.Zero;
-        for (var i = 0; i < iterations; i++)
+        // Warm-up: JIT, connection setup and first-request host costs land here, not in a sample.
+        for (var i = 0; i < 5; i++)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/conversations");
-            request.Headers.Add(InternalApiKeyMiddleware.HeaderName, headerValue);
-            var start = DateTimeOffset.UtcNow;
-            using var response = await client.SendAsync(request);
-            total += DateTimeOffset.UtcNow - start;
+            await SendOnceAsync(client, wrongValue);
+            await SendOnceAsync(client, almostValue);
         }
 
-        return total / iterations;
+        var wrongTotal = TimeSpan.Zero;
+        var almostTotal = TimeSpan.Zero;
+        for (var i = 0; i < iterations; i++)
+        {
+            // Alternate which value goes first so ordering cannot favour either one.
+            if (i % 2 == 0)
+            {
+                wrongTotal += await SendOnceAsync(client, wrongValue);
+                almostTotal += await SendOnceAsync(client, almostValue);
+            }
+            else
+            {
+                almostTotal += await SendOnceAsync(client, almostValue);
+                wrongTotal += await SendOnceAsync(client, wrongValue);
+            }
+        }
+
+        return (wrongTotal / iterations, almostTotal / iterations);
+    }
+
+    private static async Task<TimeSpan> SendOnceAsync(HttpClient client, string headerValue)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/conversations");
+        request.Headers.Add(InternalApiKeyMiddleware.HeaderName, headerValue);
+
+        var stopwatch = Stopwatch.StartNew();
+        using var response = await client.SendAsync(request);
+        stopwatch.Stop();
+        return stopwatch.Elapsed;
     }
 
     public async ValueTask DisposeAsync()

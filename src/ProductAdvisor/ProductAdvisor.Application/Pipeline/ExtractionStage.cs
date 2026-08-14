@@ -33,7 +33,7 @@ public sealed partial class ExtractionStage(
     /// Distinct from source-control history (FR-101) — bump this when the prompt's *content*
     /// changes so a turn's behavior can be attributed to a specific prompt version.
     /// </summary>
-    public const string PromptVersion = "extraction-v4";
+    public const string PromptVersion = "extraction-v5";
 
     private const string SystemPromptTemplate = """
         You translate one shopper message into a single structured intent. This is your ONLY
@@ -60,7 +60,19 @@ public sealed partial class ExtractionStage(
 
         `requirementPatch` carries ONLY fields the user's CURRENT message actually changes —
         leave every other field null; never restate a field just because it was mentioned
-        earlier. `productReferences` lists any products the user referred to, by exact name, by
+        earlier.
+
+        `requirementPatch.category` is the KIND of product being asked about — "smartphone",
+        "laptop", "headphones". Set it whenever the message names or plainly implies one, even in
+        passing ("I need a smartphone with a good camera" → category "smartphone"). A `recommend`
+        turn cannot proceed without both a category and a budget, so omitting a category the
+        shopper actually stated forces the advisor to ask for something it was already told —
+        never do that. If a category genuinely was not stated, leave it null AND list "Category"
+        in `missingFields`; the same applies to a missing budget and "Budget". `missingFields`
+        must agree with the patch: never return an empty `missingFields` while leaving an
+        essential field null.
+
+        `productReferences` lists any products the user referred to, by exact name, by
         position (e.g. "the first one"), or — if the message refers back to previously shown
         products as a group (e.g. "compare them", "усі", "їх") — every one of those previously
         shown products; resolve against the "most recently shown products" list below when one is
@@ -70,9 +82,8 @@ public sealed partial class ExtractionStage(
         item (e.g. "just the best one", "обери один найкращий"), to the stated number for "top 3"/
         "top 5"-style phrasing, and leave it null when the user did not state a count (never guess
         a default limit just because they expressed a preference like "with good battery life" —
-        that only affects ranking, not how many results come back). `missingFields` names
-        anything still needed for the identified intent. `confidence` reflects how sure you are of
-        this classification. `language` is the language the user's message was written in.
+        that only affects ranking, not how many results come back). `confidence` reflects how sure
+        you are of this classification. `language` is the language the user's message was written in.
 
         Do not include any explanation, reasoning, or text outside the JSON object.
 

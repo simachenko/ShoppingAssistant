@@ -45,7 +45,11 @@ public sealed class GatewayApiClientAuthorizationTests
             new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)),
             new CurrentUserTokenProvider());
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        // The dedicated type, not its InvalidOperationException base: Home.razor catches
+        // MissingSignInTokenException by name to show "your sign-in expired" rather than the
+        // generic "advisor isn't reachable" message, so a regression to a plain
+        // InvalidOperationException would silently change what the shopper is told.
+        var exception = await Assert.ThrowsAsync<MissingSignInTokenException>(() =>
             client.GetProductDetailAsync(Guid.NewGuid(), CancellationToken.None));
 
         Assert.Contains("id_token", exception.Message, StringComparison.Ordinal);
