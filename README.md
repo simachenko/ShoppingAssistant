@@ -13,11 +13,22 @@ LLM використовується для визначення наміру й
 - [Розгорнута система на Render](https://webapp-jcx5.onrender.com)
 - [Miro: архітектура, call loop, пам'ять, контекст і презентація](https://miro.com/app/board/uXjVHz8Zh3A=/)
 - [Prompt Book](prompt-book.md)
+- [Guardrails](docs/guardrails.md)
 - [Специфікація](specs/001-smart-product-advisor/spec.md)
 - [Специфікація: довідка про магазин (RAG)](specs/002-store-info-rag/spec.md)
 - [Архітектурний план](specs/001-smart-product-advisor/plan.md)
 - [Модель даних](specs/001-smart-product-advisor/data-model.md)
 - [API та MCP-контракти](specs/001-smart-product-advisor/contracts/)
+
+## Приклади використання
+
+Пошук і порівняння товарів (`search_products` → `compare_products`):
+
+![Пошук і порівняння товарів](searach%26compare_products.gif)
+
+Відповідь на питання про магазин через RAG (hybrid search по базі знань із цитуванням джерела):
+
+![Довідка про магазин через RAG](RAG.gif)
 
 ## Компоненти
 
