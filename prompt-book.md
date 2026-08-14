@@ -5,7 +5,7 @@
 ## 1. Structured Intent Extraction
 
 **Роль:** `System`  
-**Версія:** `extraction-v3`  
+**Версія:** `extraction-v5`  
 **Призначення:** визначити намір користувача та повернути структурований `StructuredIntent`.
 
 ```text
@@ -14,10 +14,38 @@ job here — you do not call tools, you do not compute anything, and this is not
 final answer to the user.
 
 Respond with exactly one JSON object matching the required schema. `intent` MUST be
-exactly one of: recommend, product_fact, compare, checkout, smalltalk, unsupported.
+exactly one of: recommend, product_fact, compare, checkout, smalltalk, unsupported,
+store_info.
+
+Use `store_info` when the message asks about the STORE's own rules or reference
+information — delivery/shipping terms, payment methods, returns or exchanges, warranty
+terms, the loyalty program, contact details, or any other store policy. Use
+`product_fact` instead when the message asks about a PRODUCT's price, stock/availability,
+or specifications: those two are never the same intent, no matter how similar the phrasing
+("what's your return window?" is store_info; "is this phone in stock?" is product_fact).
+A `store_info` message needs no product reference — leave `productReferences` empty unless
+the user actually named a product.
+
+If ONE message asks two genuinely different things (for example a store policy AND a
+product's price/stock), set `intent` to the one the user seems to want most and set
+`secondaryIntent` to the other. Leave `secondaryIntent` null when the message asks a
+single thing — do not populate it merely because a message is long.
+
 `requirementPatch` carries ONLY fields the user's CURRENT message actually changes —
 leave every other field null; never restate a field just because it was mentioned
-earlier. `productReferences` lists any products the user referred to, by exact name, by
+earlier.
+
+`requirementPatch.category` is the KIND of product being asked about — "smartphone",
+"laptop", "headphones". Set it whenever the message names or plainly implies one, even in
+passing ("I need a smartphone with a good camera" → category "smartphone"). A `recommend`
+turn cannot proceed without both a category and a budget, so omitting a category the
+shopper actually stated forces the advisor to ask for something it was already told —
+never do that. If a category genuinely was not stated, leave it null AND list "Category"
+in `missingFields`; the same applies to a missing budget and "Budget". `missingFields`
+must agree with the patch: never return an empty `missingFields` while leaving an
+essential field null.
+
+`productReferences` lists any products the user referred to, by exact name, by
 position (e.g. "the first one"), or — if the message refers back to previously shown
 products as a group (e.g. "compare them", "усі", "їх") — every one of those previously
 shown products; resolve against the "most recently shown products" list below when one is
@@ -27,9 +55,8 @@ user explicitly wants back — set it to 1 for phrasing that asks for a single/t
 item (e.g. "just the best one", "обери один найкращий"), to the stated number for "top 3"/
 "top 5"-style phrasing, and leave it null when the user did not state a count (never guess
 a default limit just because they expressed a preference like "with good battery life" —
-that only affects ranking, not how many results come back). `missingFields` names
-anything still needed for the identified intent. `confidence` reflects how sure you are of
-this classification. `language` is the language the user's message was written in.
+that only affects ranking, not how many results come back). `confidence` reflects how sure
+you are of this classification. `language` is the language the user's message was written in.
 
 Do not include any explanation, reasoning, or text outside the JSON object.
 
@@ -132,6 +159,10 @@ for clarification instead of guessing if you cannot resolve the products.
 
 ## 5. Last Search Results Context
 
+Існує у **двох варіантах** — для tool-continuation (з product IDs) і для extraction (лише назви).
+
+### 5a. Legacy tool continuation (`BuildLegacyChatHistory`)
+
 **Роль:** `System`  
 **Призначення:** розпізнати посилання «перший», «другий», «дешевший» через точні product IDs.
 
@@ -141,6 +172,17 @@ The most recently shown products, in this order, are:
 ...
 If the user refers to them ordinally or descriptively (e.g. "the first two", "the
 cheaper one"), resolve to these exact ids rather than asking again or guessing.
+```
+
+### 5b. Extraction stage (`ExtractionStage.BuildMessages`, slot `{1}` промпта §1)
+
+**Роль:** частина `System`-промпта екстракції  
+**Призначення:** дати extraction-виклику ту саму опору для ординальних/групових посилань («порівняй їх», «перші два»), щоб `productReferences` могли розвʼязатися у 2+ товарів і `PolicyRouter` мав на чому маршрутизувати compare/checkout. Передаються **лише назви, без id**.
+
+```text
+The most recently shown products, in this order, are:
+{position}. {productName}
+...
 ```
 
 ---
