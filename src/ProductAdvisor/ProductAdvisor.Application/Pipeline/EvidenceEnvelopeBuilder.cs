@@ -159,6 +159,12 @@ public static class EvidenceEnvelopeBuilder
     {
         var idPrefix = candidate.ProductId.ToString();
 
+        // Product names routinely contain digits — "Galaxy S24", "iPhone 15", "Pixel 9". Without
+        // this, narration that simply names the product it is describing states a number the
+        // envelope does not allow, and output validation replaces the whole reply with the
+        // generic fallback. The name is verified catalog data, so restating it is grounded.
+        claims.AddRange(NumericClaim.ExtractFrom(candidate.Name));
+
         verification[$"{idPrefix}.price"] = candidate.PriceVerified;
         provenance[$"{idPrefix}.price"] = "check_price_and_availability";
         if (candidate.PriceVerified && candidate.Price is not null)

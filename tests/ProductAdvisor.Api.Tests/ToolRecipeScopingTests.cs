@@ -1,6 +1,8 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ProductAdvisor.Application.Contracts;
+using ProductAdvisor.Infrastructure.Clients;
 using Xunit;
 
 namespace ProductAdvisor.Api.Tests;
@@ -26,7 +28,16 @@ public sealed class ToolRecipeScopingTests(AdvisorConversationApiFixture fixture
         var chatClient = new ExtractionAwareScriptedChatClient(
             """{"intent":"recommend","requirementPatch":{"category":"Smartphones","budgetAmount":15000,"budgetCurrency":"UAH"},"productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}""",
             "Nothing quite fits right now.");
-        await using var factory = new AdvisorApiFactory(fixture.ConnectionString) { ChatClientOverride = chatClient };
+        await using var factory = new AdvisorApiFactory(fixture.ConnectionString)
+        {
+            ChatClientOverride = chatClient,
+            // The route really runs its deterministic compute step, so Catalog and Pricing must
+            // answer. The default responders 404, which failed the turn before it could reach the
+            // narration call this test is actually about. Empty result sets are enough — the
+            // assertion is about which tools were offered, not about what was found.
+            CatalogResponder = _ => (HttpStatusCode.OK, new CatalogSearchResponse([], 0, 50, 0)),
+            PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse([], [])),
+        };
         var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
 

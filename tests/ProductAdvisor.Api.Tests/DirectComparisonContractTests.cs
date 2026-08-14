@@ -64,7 +64,10 @@ public sealed class DirectComparisonContractTests(AdvisorConversationApiFixture 
         conversationalFactory.ChatClientOverride = new ScriptedChatClient(
             "compare_products",
             new Dictionary<string, object?> { ["productIds"] = new[] { productA.ToString(), productB.ToString() } },
-            "Here's how they compare.");
+            "Here's how they compare.",
+            // Two product references are what routes the turn to `compare` at all — with fewer,
+            // policy routing produces a clarification and compare_products is never offered.
+            extractionJson: """{"intent":"compare","productReferences":["Galaxy S24","Pixel 9"],"missingFields":[],"confidence":0.9,"language":"en"}""");
         var conversationalClient = conversationalFactory.CreateAuthenticatedClient();
         var sessionResponse = await conversationalClient.PostAsync("/api/conversations", content: null);
         var sessionId = (await sessionResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("sessionId").GetGuid();

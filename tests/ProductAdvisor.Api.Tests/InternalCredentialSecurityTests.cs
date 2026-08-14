@@ -61,6 +61,10 @@ public sealed class InternalCredentialSecurityTests : IAsyncDisposable
         _factory = new AdvisorApiFactory { InternalApiKeyOverride = "new-rotated-key", PreviousInternalApiKeyOverride = "old-key-being-retired" };
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add(InternalApiKeyMiddleware.HeaderName, "old-key-being-retired");
+        // /api/conversations independently requires a caller identity and answers 401 without one
+        // (FR-031). Omitting it made this assertion pass or fail for a reason that had nothing to
+        // do with key rotation — the request never got far enough to prove the old key was taken.
+        client.DefaultRequestHeaders.Add("X-User-Id", "rotation-test-user");
 
         var response = await client.PostAsync("/api/conversations", content: null);
 

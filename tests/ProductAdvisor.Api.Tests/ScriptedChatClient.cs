@@ -9,12 +9,39 @@ namespace ProductAdvisor.Api.Tests;
 /// registered), so the conversation-API-level tests exercise the genuine tool handler and
 /// <see cref="ProductAdvisor.Application.IToolResultCapture"/> path end-to-end without a live LLM.
 /// </summary>
+/// <remarks>
+/// The turn-processing cycle's FIRST call is always structured-intent extraction (spec.md
+/// FR-038/FR-048), and no route is reachable without a schema-valid result from it. So
+/// <paramref name="extractionJson"/> is answered first and the scripted tool/narration only from
+/// the second call onward. Before this, every call returned <paramref name="narrationText"/> —
+/// extraction received prose instead of JSON, failed schema validation twice, and every one of
+/// these tests silently became a `clarification` turn.
+/// </remarks>
 public sealed class ScriptedChatClient(
-    string? toolNameToCall, IDictionary<string, object?>? toolArguments, string narrationText, bool throwMidStream = false) : IChatClient
+    string? toolNameToCall,
+    IDictionary<string, object?>? toolArguments,
+    string narrationText,
+    bool throwMidStream = false,
+    string extractionJson = ScriptedChatClient.RecommendSmartphonesExtraction) : IChatClient
 {
+    /// <summary>
+    /// A schema-valid `recommend` extraction with the essential fields present, which is what
+    /// most conversation-API tests need to reach their route. Tests asserting a different intent
+    /// pass their own.
+    /// </summary>
+    public const string RecommendSmartphonesExtraction =
+        """{"intent":"recommend","requirementPatch":{"category":"Smartphones","budgetAmount":15000,"budgetCurrency":"UAH"},"productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}""";
+
+    private int _callCount;
+
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
+        if (++_callCount == 1)
+        {
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, extractionJson));
+        }
+
         await InvokeScriptedToolAsync(options, cancellationToken);
 
         return new ChatResponse(new ChatMessage(ChatRole.Assistant, narrationText));
@@ -23,6 +50,12 @@ public sealed class ScriptedChatClient(
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        if (++_callCount == 1)
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, extractionJson);
+            yield break;
+        }
+
         await InvokeScriptedToolAsync(options, cancellationToken);
 
         var words = narrationText.Split(' ');

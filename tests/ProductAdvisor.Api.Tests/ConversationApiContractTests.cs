@@ -11,12 +11,23 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
 {
     private static readonly string[] RequiredCameraFeature = ["camera_mp"];
 
+    /// <summary>
+    /// Renamed from "…when_the_LLM_asks_instead_of_calling_a_tool": under the deterministic turn
+    /// cycle the model never authors a clarification. Policy routing decides an essential field is
+    /// missing (FR-002/FR-041) and the question is built in code, so what this now guards is that
+    /// the scripted narration is *not* what reaches the shopper.
+    /// </summary>
     [Fact]
-    public async Task Clarification_response_is_returned_when_the_LLM_asks_instead_of_calling_a_tool()
+    public async Task A_turn_missing_an_essential_field_returns_the_cycles_own_clarification_not_the_models_text()
     {
         await using var factory = new AdvisorApiFactory(fixture.ConnectionString)
         {
-            ChatClientOverride = new ScriptedChatClient(null, null, "What's your budget for this laptop?"),
+            // Routes to Clarify because the essential budget is absent (FR-002). The question
+            // itself is built deterministically by the cycle, not taken from the model, so the
+            // scripted narration is deliberately never what the shopper sees.
+            ChatClientOverride = new ScriptedChatClient(
+                null, null, "unused narration",
+                extractionJson: """{"intent":"recommend","requirementPatch":{"category":"Laptops"},"productReferences":[],"missingFields":["Budget"],"confidence":0.9,"language":"en"}"""),
         };
         var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
@@ -28,7 +39,8 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
         var body = await response.Content.ReadFromJsonAsync<ConversationTurnResponse>();
         Assert.NotNull(body);
         Assert.Equal("clarification", body!.Type);
-        Assert.Equal("What's your budget for this laptop?", body.Question);
+        Assert.Equal("What's your budget for this?", body.Question);
+        Assert.DoesNotContain("unused narration", body.Question!, StringComparison.Ordinal);
         Assert.Null(body.Items);
     }
 
@@ -48,16 +60,13 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
                 [
                     new PricingOfferDto(productId, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed"),
                 ], [])),
+            // The `recommend` route invokes the recommendation service directly (FR-066) and
+            // offers no tools at all, so there is nothing for the client to script here — the
+            // requirement comes from the extraction patch instead.
             ChatClientOverride = new ScriptedChatClient(
-                "get_recommendations",
-                new Dictionary<string, object?>
-                {
-                    ["category"] = "Smartphones",
-                    ["budgetAmount"] = 15000m,
-                    ["budgetCurrency"] = "UAH",
-                    ["requiredFeatures"] = RequiredCameraFeature,
-                },
-                "Here's a smartphone within your budget with a great camera."),
+                null, null,
+                "Here's a smartphone within your budget with a great camera.",
+                extractionJson: """{"intent":"recommend","requirementPatch":{"category":"Smartphones","budgetAmount":15000,"budgetCurrency":"UAH"},"productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}"""),
         };
         var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
@@ -116,7 +125,8 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
             ChatClientOverride = new ScriptedChatClient(
                 "compare_products",
                 new Dictionary<string, object?> { ["productIds"] = new[] { productA.ToString(), productB.ToString() } },
-                "Here's how the Galaxy S24 and Pixel 9 compare."),
+                "Here's how the Galaxy S24 and Pixel 9 compare.",
+                extractionJson: """{"intent":"compare","productReferences":["Galaxy S24","Pixel 9"],"missingFields":[],"confidence":0.9,"language":"en"}"""),
         };
         var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
@@ -150,9 +160,8 @@ public sealed class ConversationApiContractTests(AdvisorConversationApiFixture f
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
                 [new PricingOfferDto(productId, new PricingMoneyDto(25000m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], [])),
             ChatClientOverride = new ScriptedChatClient(
-                "get_recommendations",
-                new Dictionary<string, object?> { ["category"] = "Laptops", ["budgetAmount"] = 30000m, ["budgetCurrency"] = "UAH" },
-                "Here's a laptop within your budget."),
+                null, null, "Here's a laptop within your budget.",
+                extractionJson: """{"intent":"recommend","requirementPatch":{"category":"Laptops","budgetAmount":30000,"budgetCurrency":"UAH"},"productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}"""),
         };
         var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);

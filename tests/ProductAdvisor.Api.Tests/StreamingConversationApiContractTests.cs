@@ -43,16 +43,11 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
                     [new CatalogSpecificationDto("camera_mp", "50", "MP")])], 1, 50, 1)),
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
                 [new PricingOfferDto(productId, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], [])),
+            // The `recommend` route calls the recommendation service directly and offers no tools
+            // (FR-066), so the requirement arrives via the extraction patch rather than a
+            // scripted tool call.
             ChatClientOverride = new ScriptedChatClient(
-                "get_recommendations",
-                new Dictionary<string, object?>
-                {
-                    ["category"] = "Smartphones",
-                    ["budgetAmount"] = 15000m,
-                    ["budgetCurrency"] = "UAH",
-                    ["requiredFeatures"] = RequiredCameraFeature,
-                },
-                narration),
+                null, null, narration, extractionJson: """{"intent":"recommend","requirementPatch":{"category":"Smartphones","budgetAmount":15000,"budgetCurrency":"UAH"},"productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}"""),
         };
 
         const string userMessage = "I need a smartphone with a good camera and a budget of up to 15000 UAH";
@@ -80,15 +75,29 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
         Assert.Equal(nonStreamingBody.UnmetConstraintExplanation, streamedResult.UnmetConstraintExplanation);
     }
 
+    /// <summary>
+    /// Uses a `smalltalk` turn rather than a recommendation. The `recommend` route's narration is
+    /// deliberately buffered — output validation must see the whole text before any of it reaches
+    /// the client (FR-088) — so that route never token-streams from the provider and a mid-stream
+    /// interruption is not reachable on it at all. The contract under test (FR-015: a connection
+    /// that ends without a `result` event is a failure, never a silently-accepted empty answer) is
+    /// route-agnostic, and `smalltalk` is the simplest route that actually streams tokens.
+    /// </summary>
     [Fact]
     public async Task A_stream_interrupted_before_its_result_event_is_detectable_as_incomplete()
     {
-        var (client, sessionId, _) = await StartRecommendationSessionAsync(throwMidStream: true);
+        await using var factory = new AdvisorApiFactory(fixture.ConnectionString)
+        {
+            ChatClientOverride = new ScriptedChatClient(
+                null, null, "Hello there, how can I help you today?", throwMidStream: true,
+                extractionJson: """{"intent":"smalltalk","productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}"""),
+        };
+        var client = factory.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(client);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/conversations/{sessionId}/messages/stream")
         {
-            Content = JsonContent.Create(new SendMessageRequest(
-                "I need a smartphone with a good camera and a budget of up to 15000 UAH")),
+            Content = JsonContent.Create(new SendMessageRequest("Hello!")),
         };
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
         response.EnsureSuccessStatusCode();
@@ -132,16 +141,10 @@ public sealed class StreamingConversationApiContractTests(AdvisorConversationApi
             PricingResponder = _ => (HttpStatusCode.OK, new PricingBatchResponse(
                 [new PricingOfferDto(productId, new PricingMoneyDto(14500m, "UAH"), null, "InStock", DateTimeOffset.UtcNow, "seed")], [])),
             ChatClientOverride = new ScriptedChatClient(
-                "get_recommendations",
-                new Dictionary<string, object?>
-                {
-                    ["category"] = "Smartphones",
-                    ["budgetAmount"] = 15000m,
-                    ["budgetCurrency"] = "UAH",
-                    ["requiredFeatures"] = RequiredCameraFeature,
-                },
+                null, null,
                 "Here's a smartphone within your budget with a great camera.",
-                throwMidStream),
+                throwMidStream,
+                extractionJson: """{"intent":"recommend","requirementPatch":{"category":"Smartphones","budgetAmount":15000,"budgetCurrency":"UAH"},"productReferences":[],"missingFields":[],"confidence":0.9,"language":"en"}"""),
         };
         var client = factory.CreateAuthenticatedClient();
         var sessionId = await CreateSessionAsync(client);
