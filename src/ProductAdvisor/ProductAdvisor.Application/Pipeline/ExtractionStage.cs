@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ProductAdvisor.Domain;
 
 namespace ProductAdvisor.Application.Pipeline;
@@ -11,8 +13,22 @@ namespace ProductAdvisor.Application.Pipeline;
 /// final outcome. Uses schema-first structured output (FR-094); exactly one repair attempt is
 /// made when the first result fails schema validation (FR-051), never a third attempt.
 /// </summary>
-public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
+public sealed partial class ExtractionStage(
+    IChatClient chatClient, TurnMetrics metrics, ILogger<ExtractionStage>? logger = null)
 {
+    private readonly ILogger _logger = logger ?? NullLogger<ExtractionStage>.Instance;
+
+    /// <summary>
+    /// A provider-level failure (missing/invalid API key, exhausted quota, unknown model,
+    /// unreachable endpoint) reaches the shopper as the same generic clarification a genuinely
+    /// unclear message does — so it must be visible here, or it is visible nowhere.
+    /// </summary>
+    [LoggerMessage(Level = LogLevel.Error, Message = "Structured-intent extraction call failed; this turn will fall back to a clarification.")]
+    private partial void LogExtractionCallFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Structured-intent extraction returned a result that failed schema validation (intent={Intent}).")]
+    private partial void LogExtractionSchemaRejected(string intent);
+
     /// <summary>
     /// Distinct from source-control history (FR-101) — bump this when the prompt's *content*
     /// changes so a turn's behavior can be attributed to a specific prompt version.
@@ -108,14 +124,28 @@ public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
             var response = await chatClient.GetResponseAsync<StructuredIntentDto>(
                 messages, cancellationToken: cancellationToken);
             var dto = response.Result;
-            return IsSchemaValid(dto) ? dto : null;
+            if (IsSchemaValid(dto))
+            {
+                return dto;
+            }
+
+            // The provider answered, but not in the required shape.
+            LogExtractionSchemaRejected(dto?.Intent.ToString() ?? "(null result)");
+            return null;
         }
-        catch (Exception) when (cancellationToken.IsCancellationRequested is false)
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested is false)
         {
             // A malformed/non-conforming model response is exactly a schema-validation failure
             // (FR-039), not a fatal error — the caller decides what happens next (repair, then
             // clarification), never lets an unvalidated result through. A cancellation is not
             // caught here — it propagates so the caller's own cancellation handling applies.
+            //
+            // Logged rather than swallowed silently: a provider-level failure (bad or missing
+            // API key, exhausted quota, unknown model, unreachable endpoint) is indistinguishable
+            // to the shopper from a genuinely unclear message — every one of them surfaces as the
+            // same "I didn't quite catch that". Without this line the cause is invisible, since
+            // the turn then routes to `clarify` exactly as a low-confidence turn would.
+            LogExtractionCallFailed(ex);
             return null;
         }
     }
