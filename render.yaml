@@ -16,6 +16,11 @@ services:
         sync: false
       - key: InternalApiKey
         sync: false
+      # Declared here rather than only in the dashboard: a Blueprint sync treats render.yaml as
+      # the source of truth for a service's variable set, so anything set only by hand is at risk
+      # of being dropped. `sync: false` keeps the existing dashboard value.
+      - key: SeedDemoData
+        sync: false
       # Points every service's OpenTelemetry export at a free-tier OTLP backend (e.g. Grafana
       # Cloud) in place of the local-only Aspire Dashboard (FR-027/FR-028, research.md §16).
       - key: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -40,6 +45,9 @@ services:
       - key: ConnectionStrings__pricingdb
         sync: false
       - key: InternalApiKey
+        sync: false
+      # See the note on catalog-api: declared so a Blueprint sync cannot drop it.
+      - key: SeedDemoData
         sync: false
       - key: OTEL_EXPORTER_OTLP_ENDPOINT
         sync: false
