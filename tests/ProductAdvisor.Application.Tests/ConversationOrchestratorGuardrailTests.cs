@@ -17,7 +17,7 @@ public class ConversationOrchestratorGuardrailTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, guardrailOptions, TestTurnMetrics.Instance, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, guardrailOptions, TestTurnMetrics.Instance, TestLogger.Instance);
 
     [Fact]
     public async Task An_oversized_message_never_reaches_extraction()

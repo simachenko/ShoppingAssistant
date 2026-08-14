@@ -32,7 +32,15 @@ public sealed record ChatTurnDto(
     IReadOnlyList<string>? Criteria = null,
     IReadOnlyList<ComparisonRowDto>? Rows = null,
     string? Url = null,
-    IReadOnlyList<Guid>? ProductIds = null);
+    IReadOnlyList<Guid>? ProductIds = null,
+    IReadOnlyList<CitationDto>? Citations = null);
+
+/// <summary>
+/// A source document behind a store-policy answer (002 FR-008). Rendered as structured markup by
+/// the UI, never through the narration's Markdown — provenance must stay visible and unaltered
+/// even when the narration text is replaced by output validation.
+/// </summary>
+public sealed record CitationDto(Guid DocumentId, string DocumentTitle, Guid ChunkId);
 
 /// <summary>
 /// One item from the Gateway's streaming chat endpoint (FR-015/research.md §11) — either a

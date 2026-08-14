@@ -14,6 +14,7 @@ LLM використовується для визначення наміру й
 - [Miro: архітектура, call loop, пам'ять, контекст і презентація](https://miro.com/app/board/uXjVHz8Zh3A=/)
 - [Prompt Book](prompt-book.md)
 - [Специфікація](specs/001-smart-product-advisor/spec.md)
+- [Специфікація: довідка про магазин (RAG)](specs/002-store-info-rag/spec.md)
 - [Архітектурний план](specs/001-smart-product-advisor/plan.md)
 - [Модель даних](specs/001-smart-product-advisor/data-model.md)
 - [API та MCP-контракти](specs/001-smart-product-advisor/contracts/)
@@ -27,7 +28,7 @@ LLM використовується для визначення наміру й
 | `ProductAdvisor.Api` | Агент, conversation orchestration, MCP server і deterministic tools |
 | `ProductCatalog.Api` | Товари, бренди, категорії, характеристики та параметричний пошук |
 | `PricingAvailability.Api` | Актуальні ціни, знижки, availability і freshness timestamp |
-| `PostgreSQL` | Окремі `catalogdb`, `pricingdb` та `advisordb` |
+| `PostgreSQL` | Окремі `catalogdb`, `pricingdb` та `advisordb` (останній — з розширенням `pgvector`) |
 | `.NET Aspire` | Локальна оркестрація, service discovery та observability dashboard |
 
 ## Підключені джерела даних
@@ -37,6 +38,7 @@ LLM використовується для визначення наміру й
 | Product Catalog | Назви, бренди, категорії та характеристики | Через внутрішній Catalog API і MCP read-only tools |
 | Pricing & Availability | Ціни, знижки, стан запасів і `asOf` | Через внутрішній Pricing API та batch lookup |
 | Advisor Database | Історія діалогу, `CurrentRequirement`, уточнення й останні результати | Структурована пам'ять агента |
+| Store Knowledge Base | Документи магазину: доставка, оплата, повернення, гарантія, лояльність, контакти | Hybrid search (pgvector + full-text) для відповідей із посиланням на джерело |
 | LLM provider | Structured intent extraction і narration | Через `Microsoft.Extensions.AI`; підтримується OpenAI-compatible endpoint |
 | Google OAuth/OIDC | Ідентичність користувача | Вхід у WebApp та перевірка токена в Gateway |
 | OTLP backend | Traces, metrics і logs | Опційний експорт через OpenTelemetry |
@@ -59,6 +61,7 @@ LLM використовується для визначення наміру й
 LLM_PROVIDER_ENDPOINT=https://your-openai-compatible-endpoint
 LLM_PROVIDER_API_KEY=replace-with-secret
 LLM_PROVIDER_MODEL=your-model-name
+LLM_PROVIDER_EMBEDDING_MODEL=your-embedding-model-name
 
 INTERNAL_API_KEY=replace-with-long-random-secret
 
@@ -84,6 +87,7 @@ http://localhost:5000/signin-google
 | `LLM_PROVIDER_ENDPOINT` | Так | OpenAI-compatible endpoint |
 | `LLM_PROVIDER_API_KEY` | Так | Credential LLM provider |
 | `LLM_PROVIDER_MODEL` | Так | Назва моделі |
+| `LLM_PROVIDER_EMBEDDING_MODEL` | Так | Назва embedding-моделі для RAG-пошуку по документах магазину |
 | `INTERNAL_API_KEY` | Так | Автентифікація внутрішніх API та MCP endpoint |
 | `GOOGLE_CLIENT_ID` | Так | Google OAuth client і перевірка audience |
 | `GOOGLE_CLIENT_SECRET` | Так | Google sign-in у WebApp |
@@ -201,3 +205,34 @@ OTLP-compatible backend.
 3. Налаштувати LLM provider secrets.
 4. Налаштувати encrypted PostgreSQL databases і backups.
 5. За потреби задати OTLP endpoint та headers.
+6. **Увімкнути розширення `pgvector` у production `advisordb`** — див. розділ нижче.
+7. Задати `LlmProvider__EmbeddingModel` у Render dashboard (`sync: false` у `render.yaml`).
+8. За потреби задати `SeedDemoData=true` для `advisor-api`, щоб наповнити базу знань магазину.
+
+### pgvector у production database (обов'язково для advisor-api)
+
+`advisor-api` виконує EF Core міграції під час старту, і міграція
+`AddStoreInfoKnowledgeBase` починається з:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Це **не** обгорнуто в try/catch: якщо міграція впаде, контейнер не стартує взагалі. Роль
+застосунку (`advisor_role`) не є superuser і не може створити розширення сама — тому створіть
+його один раз вручну, під привілейованим користувачем, **до першого деплою**:
+
+```bash
+psql "<production advisordb connection string>" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+Після цього міграція застосунку проходить як no-op (Postgres перевіряє існування розширення
+перед перевіркою прав). Провайдер бази має підтримувати `pgvector` — Neon, Render Postgres і
+Supabase підтримують; перевірте це до вибору плану.
+
+### Розмірність embeddings зафіксована схемою
+
+Колонка `document_chunks."Embedding"` оголошена як `vector(1536)`, що відповідає
+`text-embedding-3-small`. Модель з іншою розмірністю (наприклад `text-embedding-3-large`, 3072)
+не запишеться в цю колонку — зміна моделі потребує **нової міграції**, а не лише зміни
+`LlmProvider__EmbeddingModel`.

@@ -20,8 +20,17 @@ CREATE DATABASE pricingdb OWNER pricing_role;
 REVOKE ALL ON DATABASE pricingdb FROM PUBLIC;
 GRANT ALL PRIVILEGES ON DATABASE pricingdb TO pricing_role;
 
--- Product Advisor Service (conversation history only — no product/price data)
+-- Product Advisor Service (conversation history + the store-policy knowledge base)
 CREATE ROLE advisor_role LOGIN PASSWORD 'advisor_dev_password';
 CREATE DATABASE advisordb OWNER advisor_role;
 REVOKE ALL ON DATABASE advisordb FROM PUBLIC;
 GRANT ALL PRIVILEGES ON DATABASE advisordb TO advisor_role;
+
+-- pgvector must be installed by a superuser: CREATE EXTENSION is not something the
+-- least-privileged advisor_role can do, so the service's own EF Core migration cannot install it
+-- (002 research.md §6). The migration still emits CREATE EXTENSION IF NOT EXISTS, which succeeds
+-- as a no-op once the extension is already present here — Postgres short-circuits before the
+-- privilege check. Managed Postgres works the same way: provision the extension once, out of
+-- band, then let the application migrate normally.
+\connect advisordb
+CREATE EXTENSION IF NOT EXISTS vector;

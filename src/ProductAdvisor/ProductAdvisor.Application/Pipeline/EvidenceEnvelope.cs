@@ -1,3 +1,5 @@
+using ProductAdvisor.Domain;
+
 namespace ProductAdvisor.Application.Pipeline;
 
 /// <summary>
@@ -46,6 +48,22 @@ public sealed record EvidenceEnvelope
     /// numeric-token normalization <see cref="AllowedClaims"/> uses.
     /// </summary>
     public string? AllowedUrl { get; init; }
+
+    /// <summary>
+    /// The source documents backing a store-policy answer (spec.md 002 FR-008), carried verbatim
+    /// through to the turn's result and the wire contract so narration never re-derives — or
+    /// invents — a citation. Empty for every other route: a recommendation/comparison/checkout
+    /// turn cites structured product data, not documents.
+    /// </summary>
+    public IReadOnlyList<Citation> Citations { get; init; } = [];
+
+    /// <summary>
+    /// The language the reply must be written in (spec.md 002 FR-029) — the shopper's, never the
+    /// retrieved document's. Carried on the envelope so the deterministic fallbacks output
+    /// validation produces are in the same language as the narration they replace, instead of
+    /// silently reverting to the system default.
+    /// </summary>
+    public string? AnswerLanguage { get; init; }
 }
 
 public sealed record ToolExecutionRecord(string Tool, bool Succeeded);

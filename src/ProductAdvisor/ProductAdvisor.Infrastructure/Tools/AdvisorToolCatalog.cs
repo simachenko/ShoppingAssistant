@@ -11,7 +11,8 @@ namespace ProductAdvisor.Infrastructure.Tools;
 /// <see cref="AIFunction"/>s for the chat client's function-invocation loop — no separate
 /// implementation, no separate behavior, just a different invocation path (research.md §1).
 /// </summary>
-public sealed class AdvisorToolCatalog(DataAccessTools dataAccessTools, ComputeTools computeTools) : IAdvisorToolCatalog
+public sealed class AdvisorToolCatalog(
+    DataAccessTools dataAccessTools, ComputeTools computeTools, RagTools ragTools) : IAdvisorToolCatalog
 {
     public IReadOnlyList<AITool> GetTools() =>
     [
@@ -43,6 +44,10 @@ public sealed class AdvisorToolCatalog(DataAccessTools dataAccessTools, ComputeT
             computeTools.GenerateCheckoutLinkAsync,
             "generate_checkout_link",
             "Given one or more product ids the user wants to buy — resolved from their names or from an ordinal/descriptive reference to the most recently shown results — return a checkout link listing exactly those products. Do not construct the link yourself; always call this tool, and if you cannot resolve which products the user means, ask rather than guessing."),
+        AIFunctionFactory.Create(
+            ragTools.RetrieveStoreInfoAsync,
+            "retrieve_store_info",
+            "Search the store's reference documentation (delivery, payment, returns, warranty, loyalty program, contacts, and other store policies) for content relevant to a shopper's question. Returns matched fragments with their source document, or an empty result when nothing in the knowledge base is relevant enough to answer confidently. Never used for product price, availability, specifications, or comparisons — those come only from the product-data tools in this catalog."),
     ];
 
     public IReadOnlyList<AITool> GetTools(Route route)

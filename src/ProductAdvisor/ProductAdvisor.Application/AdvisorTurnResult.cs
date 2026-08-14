@@ -24,6 +24,14 @@ public sealed record AdvisorTurnResult
     /// </summary>
     public bool? Degraded { get; init; }
 
+    /// <summary>
+    /// The store documents backing a store-policy <c>answer</c> (spec.md 002 FR-008). Null for
+    /// every other result type and for a `smalltalk` answer — a store-policy answer that states a
+    /// policy claim always carries at least one, and the honest "couldn't find it" answer
+    /// (FR-009) carries an empty list rather than a fabricated source.
+    /// </summary>
+    public IReadOnlyList<Citation>? Citations { get; init; }
+
     public static AdvisorTurnResult ForClarification(string question) =>
         new() { Type = "clarification", Question = question };
 
@@ -42,6 +50,16 @@ public sealed record AdvisorTurnResult
     /// </summary>
     public static AdvisorTurnResult ForAnswer(string message) =>
         new() { Type = "answer", Message = message };
+
+    /// <summary>
+    /// A store-policy answer (spec.md 002 FR-024) — the same first-class <c>answer</c> type, never
+    /// an eighth result type, carrying the source documents its claims came from (FR-008). An
+    /// empty <paramref name="citations"/> is valid only for the honest "couldn't find it" message
+    /// (FR-009), never alongside a stated policy claim — a constraint output validation enforces
+    /// structurally, since that turn's allowed claims are derived only from cited chunks.
+    /// </summary>
+    public static AdvisorTurnResult ForStoreInfoAnswer(string message, IReadOnlyList<Citation> citations) =>
+        new() { Type = "answer", Message = message, Citations = citations };
 
     /// <summary>
     /// A recognized but out-of-scope request (`unsupported`-intent turns, spec.md FR-064) —

@@ -14,7 +14,16 @@ public sealed record ConversationTurnResponse(
     string? Url = null,
     IReadOnlyList<Guid>? ProductIds = null,
     IReadOnlyList<NearestAlternativeResponse>? NearestAlternatives = null,
-    bool? Degraded = null);
+    bool? Degraded = null,
+    IReadOnlyList<CitationResponse>? Citations = null);
+
+/// <summary>
+/// A source document backing a store-policy answer (spec.md 002 FR-008,
+/// contracts/advisor-conversation-api-additions.md). Structured provenance, not narration — it
+/// stays visible even if <c>Message</c> is regenerated, the same split every other structured
+/// field here already has.
+/// </summary>
+public sealed record CitationResponse(Guid DocumentId, string DocumentTitle, Guid ChunkId);
 
 public sealed record NearestAlternativeResponse(
     Guid ProductId,

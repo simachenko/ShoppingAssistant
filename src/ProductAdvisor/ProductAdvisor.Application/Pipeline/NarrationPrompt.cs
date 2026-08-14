@@ -42,7 +42,15 @@ public static class NarrationPrompt
         {2}
         """;
 
-    public static List<ChatMessage> BuildMessages(UserRequirement requirement, EvidenceEnvelope envelope)
+    /// <param name="answerLanguage">
+    /// The language the reply must be written in (spec.md 002 FR-029). Defaults to the session's
+    /// requirement language, which is right for product routes — but a store-policy turn passes
+    /// the language detected for *this message*, because the shopper's language governs the reply
+    /// even when the grounding document is in another language, and a store-policy question often
+    /// carries no requirement patch to update the session language with.
+    /// </param>
+    public static List<ChatMessage> BuildMessages(
+        UserRequirement requirement, EvidenceEnvelope envelope, string? answerLanguage = null)
     {
         var requirementSummary =
             $"category={requirement.Category ?? "(unknown)"}, " +
@@ -53,7 +61,10 @@ public static class NarrationPrompt
         var evidenceJson = JsonSerializer.Serialize(envelope.CanonicalData);
 
         var systemPrompt = SystemPromptTemplate
-            .Replace("{0}", requirement.Language, StringComparison.Ordinal)
+            .Replace(
+                "{0}",
+                string.IsNullOrWhiteSpace(answerLanguage) ? requirement.Language : answerLanguage,
+                StringComparison.Ordinal)
             .Replace("{1}", requirementSummary, StringComparison.Ordinal)
             .Replace("{2}", evidenceJson, StringComparison.Ordinal);
 

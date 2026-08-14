@@ -88,6 +88,59 @@ public static class EvidenceEnvelopeBuilder
         };
     }
 
+    /// <summary>
+    /// Builds the envelope for a store-policy turn (spec.md 002 FR-007/FR-008, research.md §9).
+    /// <c>AllowedClaims</c> is derived from the retrieved chunks' text and nothing else, so output
+    /// validation structurally rejects any policy number narration states that no retrieved
+    /// fragment contains — the citation requirement and the no-fabrication requirement are
+    /// enforced by the same mechanism rather than by asking the model to behave.
+    /// </summary>
+    public static EvidenceEnvelope ForStoreInfo(StoreInfoAnswer answer, string? answerLanguage = null)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+
+        var verification = new Dictionary<string, bool>();
+        var provenance = new Dictionary<string, string>();
+        var claims = new List<string>();
+
+        foreach (var match in answer.Matches)
+        {
+            var field = $"{match.DocumentId}.{match.ChunkId}";
+            // Retrieved document text is verified by definition: it is quoted store content, not
+            // a value looked up from a dependency that might have been unavailable.
+            verification[field] = true;
+            provenance[field] = "retrieve_store_info";
+            claims.AddRange(NumericClaim.ExtractFrom(match.Content));
+        }
+
+        // One citation per distinct source document, keeping the earliest (best-ranked) chunk as
+        // the representative fragment — a shopper tracing a claim wants the document, and the
+        // exact fragment for audit, not one entry per fragment of the same document.
+        var citations = answer.Matches
+            .GroupBy(m => m.DocumentId)
+            .Select(g => g.First())
+            .Select(m => new Citation
+            {
+                DocumentId = m.DocumentId,
+                DocumentTitle = m.DocumentTitle,
+                ChunkId = m.ChunkId,
+            })
+            .ToList();
+
+        return new EvidenceEnvelope
+        {
+            ResultType = "answer",
+            CanonicalData = answer,
+            VerificationStatus = verification,
+            Provenance = provenance,
+            UnverifiedOrUnavailableFields = [],
+            ToolExecutionStatus = [new ToolExecutionRecord("retrieve_store_info", true)],
+            AllowedClaims = [.. claims.Distinct(StringComparer.Ordinal)],
+            Citations = citations,
+            AnswerLanguage = answerLanguage,
+        };
+    }
+
     public static EvidenceEnvelope ForCheckoutLink(CheckoutLink checkoutLink) => new()
     {
         ResultType = "checkoutLink",

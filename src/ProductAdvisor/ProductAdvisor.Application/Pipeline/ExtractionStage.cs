@@ -17,7 +17,7 @@ public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
     /// Distinct from source-control history (FR-101) — bump this when the prompt's *content*
     /// changes so a turn's behavior can be attributed to a specific prompt version.
     /// </summary>
-    public const string PromptVersion = "extraction-v3";
+    public const string PromptVersion = "extraction-v4";
 
     private const string SystemPromptTemplate = """
         You translate one shopper message into a single structured intent. This is your ONLY
@@ -25,7 +25,23 @@ public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
         final answer to the user.
 
         Respond with exactly one JSON object matching the required schema. `intent` MUST be
-        exactly one of: recommend, product_fact, compare, checkout, smalltalk, unsupported.
+        exactly one of: recommend, product_fact, compare, checkout, smalltalk, unsupported,
+        store_info.
+
+        Use `store_info` when the message asks about the STORE's own rules or reference
+        information — delivery/shipping terms, payment methods, returns or exchanges, warranty
+        terms, the loyalty program, contact details, or any other store policy. Use
+        `product_fact` instead when the message asks about a PRODUCT's price, stock/availability,
+        or specifications: those two are never the same intent, no matter how similar the phrasing
+        ("what's your return window?" is store_info; "is this phone in stock?" is product_fact).
+        A `store_info` message needs no product reference — leave `productReferences` empty unless
+        the user actually named a product.
+
+        If ONE message asks two genuinely different things (for example a store policy AND a
+        product's price/stock), set `intent` to the one the user seems to want most and set
+        `secondaryIntent` to the other. Leave `secondaryIntent` null when the message asks a
+        single thing — do not populate it merely because a message is long.
+
         `requirementPatch` carries ONLY fields the user's CURRENT message actually changes —
         leave every other field null; never restate a field just because it was mentioned
         earlier. `productReferences` lists any products the user referred to, by exact name, by
@@ -117,6 +133,9 @@ public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
         Language = dto.Language,
         ProductReferences = dto.ProductReferences ?? [],
         MissingFields = dto.MissingFields ?? [],
+        // Only a *different* intent counts as a second request: a model echoing the primary
+        // intent here would otherwise make every turn append a redundant follow-up offer.
+        SecondaryIntent = dto.SecondaryIntent != dto.Intent ? dto.SecondaryIntent : null,
         RequirementPatch = dto.RequirementPatch is null ? null : new RequirementPatch
         {
             Category = dto.RequirementPatch.Category,
@@ -184,7 +203,7 @@ public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
     /// </summary>
     private sealed record StructuredIntentDto
     {
-        [Description("One of: recommend, product_fact, compare, checkout, smalltalk, unsupported.")]
+        [Description("One of: recommend, product_fact, compare, checkout, smalltalk, unsupported, store_info.")]
         public required Intent Intent { get; init; }
 
         public RequirementPatchDto? RequirementPatch { get; init; }
@@ -195,6 +214,9 @@ public sealed class ExtractionStage(IChatClient chatClient, TurnMetrics metrics)
         public required double Confidence { get; init; }
 
         public required string Language { get; init; }
+
+        [Description("A second, different request in the same message (e.g. a product question alongside a store-policy one), or null if the message asks one thing.")]
+        public Intent? SecondaryIntent { get; init; }
     }
 
     private sealed record RequirementPatchDto

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 using ProductAdvisor.Infrastructure;
 
 #nullable disable
@@ -21,6 +22,7 @@ namespace ProductAdvisor.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("ProductAdvisor.Domain.ConversationSession", b =>
@@ -41,6 +43,92 @@ namespace ProductAdvisor.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("conversation_sessions", "advisor");
+                });
+
+            modelBuilder.Entity("ProductAdvisor.Domain.DocumentChunk", b =>
+                {
+                    b.Property<Guid>("ChunkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Vector>("Embedding")
+                        .IsRequired()
+                        .HasColumnType("vector(1536)");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StoreId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("ChunkId");
+
+                    b.HasIndex("DocumentId", "Order")
+                        .IsUnique();
+
+                    b.HasIndex("StoreId", "Status");
+
+                    b.ToTable("document_chunks", "advisor");
+                });
+
+            modelBuilder.Entity("ProductAdvisor.Domain.StoreDocument", b =>
+                {
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DocumentType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StoreId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SupersededAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("SupersedesDocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("DocumentId");
+
+                    b.HasIndex("StoreId", "Status", "DocumentType");
+
+                    b.ToTable("store_documents", "advisor");
                 });
 
             modelBuilder.Entity("ProductAdvisor.Domain.ConversationSession", b =>
@@ -122,6 +210,9 @@ namespace ProductAdvisor.Infrastructure.Migrations
                         {
                             b1.Property<Guid>("ConversationSessionSessionId");
 
+                            b1.PrimitiveCollection<string>("AvailabilityRequirements")
+                                .IsRequired();
+
                             b1.Property<string>("Category");
 
                             b1.Property<string>("Currency")
@@ -135,6 +226,10 @@ namespace ProductAdvisor.Infrastructure.Migrations
 
                             b1.PrimitiveCollection<string>("RequiredFeatures")
                                 .IsRequired();
+
+                            b1.Property<int?>("ResultLimit");
+
+                            b1.Property<string>("Units");
 
                             b1.HasKey("ConversationSessionSessionId");
 
@@ -175,6 +270,20 @@ namespace ProductAdvisor.Infrastructure.Migrations
                     b.Navigation("Messages");
 
                     b.Navigation("PendingClarification");
+                });
+
+            modelBuilder.Entity("ProductAdvisor.Domain.DocumentChunk", b =>
+                {
+                    b.HasOne("ProductAdvisor.Domain.StoreDocument", null)
+                        .WithMany("Chunks")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ProductAdvisor.Domain.StoreDocument", b =>
+                {
+                    b.Navigation("Chunks");
                 });
 #pragma warning restore 612, 618
         }

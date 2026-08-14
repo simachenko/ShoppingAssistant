@@ -7,9 +7,12 @@ namespace ProductAdvisor.Infrastructure.ToolRecipes;
 /// (spec.md FR-066–FR-070, data-model.md `ToolRecipe`) — a tool outside the current route's
 /// recipe is never reachable for that turn (FR-068). Only the three routes still bridged through
 /// the free tool-invocation loop (`compare`/`checkout`/`product_fact`,
-/// <c>ConversationOrchestrator</c>) need a non-empty entry here: `recommend` already calls its
-/// terminal tool deterministically (Phase 9, <c>IRecommendationService</c>), and
-/// `smalltalk`/`unsupported`/`clarify` make zero tool calls.
+/// <c>ConversationOrchestrator</c>) need a non-empty entry here: `recommend` and `store_info`
+/// already call their terminal tool deterministically (<c>IRecommendationService</c>,
+/// <c>IStoreInfoRetrievalService</c>), and `smalltalk`/`unsupported`/`clarify` make zero tool
+/// calls. `store_info`'s empty entry is also what structurally denies it every product-data tool
+/// (spec.md 002 FR-004) — and no product route's entry names <c>retrieve_store_info</c>, denying
+/// the reverse direction just as structurally (spec.md 002 FR-005).
 /// </summary>
 public static class ToolRecipe
 {

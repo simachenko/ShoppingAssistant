@@ -39,6 +39,18 @@
         {
             <div class="alert alert-info">@((MarkupString)NarrationMarkdownRenderer.ToSafeHtml(clarificationTurn.Question ?? ""))</div>
         }
+        @* Store-policy sources (002 FR-008). Rendered as plain markup, never through the
+           narration's Markdown path: a citation is structured provenance the shopper must be able
+           to trust, so it is never assembled from LLM-authored text. *@
+        else if (entry.Turn is { Type: "answer", Citations: { Count: > 0 } citations })
+        {
+            <div class="citation-list">
+                <small>
+                    <strong>Source@(citations.Count > 1 ? "s" : ""):</strong>
+                    @string.Join(", ", citations.Select(c => c.DocumentTitle))
+                </small>
+            </div>
+        }
         else if (entry.Turn is { Type: "recommendation" } recommendationTurn)
         {
             @if (recommendationTurn.Items is { Count: > 0 })

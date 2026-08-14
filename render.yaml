@@ -78,6 +78,16 @@ services:
         sync: false
       - key: LlmProvider__ApiKey
         sync: false
+      # The embedding model behind store-policy retrieval (002 research.md §7). Its output
+      # dimension MUST match the `vector(1536)` column the migration declares — changing to a
+      # different-dimension model needs a new migration, not just a new value here.
+      - key: LlmProvider__EmbeddingModel
+        sync: false
+      # Populates the demo store-policy knowledge base on first start. Without it advisor-api runs
+      # fine but every store-policy question honestly answers "not found" (002 FR-009), because the
+      # index is empty — set to false once real content is ingested instead.
+      - key: SeedDemoData
+        sync: false
       - key: LlmProvider__Model
         sync: false
       - key: InternalApiKey

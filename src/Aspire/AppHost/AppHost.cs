@@ -1,6 +1,11 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")
+    // pgvector's image rather than Aspire's default postgres: the advisor schema's store-policy
+    // knowledge base uses a `vector` column, so its migration's CREATE EXTENSION vector needs the
+    // extension present (002 research.md §6). Same Postgres 16 server for every database here.
+    .WithImage("pgvector/pgvector")
+    .WithImageTag("pg16")
     .WithDataVolume()
     .WithLifetime(ContainerLifetime.Persistent);
 

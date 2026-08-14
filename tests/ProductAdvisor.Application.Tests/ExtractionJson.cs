@@ -109,6 +109,16 @@ public static class ExtractionJson
         language,
     });
 
+    /// <summary>A store-policy question (spec.md 002 FR-002) — no product reference by design.</summary>
+    public static string StoreInfo(double confidence = 0.9, string language = "en") => Build(new
+    {
+        intent = "store_info",
+        productReferences = Array.Empty<string>(),
+        missingFields = Array.Empty<string>(),
+        confidence,
+        language,
+    });
+
     public static string LowConfidence(string intent = "recommend", double confidence = 0.1, string[]? missingFields = null, string language = "en") => Build(new
     {
         intent,

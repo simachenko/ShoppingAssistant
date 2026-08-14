@@ -81,7 +81,7 @@ public sealed class ConversationOrchestratorMetricsTests : IDisposable
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, _metrics), new FakeRecommendationService(recommendation),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), _metrics, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), _metrics, TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "I need a smartphone under 15000 UAH", CancellationToken.None);
@@ -94,7 +94,7 @@ public sealed class ConversationOrchestratorMetricsTests : IDisposable
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, _metrics),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), _metrics, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), _metrics, TestLogger.Instance);
 
     public void Dispose()
     {

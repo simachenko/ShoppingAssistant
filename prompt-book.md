@@ -247,3 +247,14 @@ Given two or more product ids, return their specifications side-by-side using on
 ```text
 Given one or more product ids the user wants to buy — resolved from their names or from an ordinal/descriptive reference to the most recently shown results — return a checkout link listing exactly those products. Do not construct the link yourself; always call this tool, and if you cannot resolve which products the user means, ask rather than guessing.
 ```
+
+## retrieve_store_info
+
+**Роль:** `Tool metadata`  
+**Призначення:** знайти фрагменти довідкових документів магазину (доставка, оплата, повернення, гарантія, лояльність, контакти) для відповіді з посиланням на джерело. Ніколи не використовується для цін, залишків, характеристик чи порівнянь товарів — ці дані надходять лише від продуктових інструментів вище (spec.md 002 FR-004/FR-005).
+
+```text
+Search the store's reference documentation (delivery, payment, returns, warranty, loyalty program, contacts, and other store policies) for content relevant to a shopper's question. Returns matched fragments with their source document, or an empty result when nothing in the knowledge base is relevant enough to answer confidently. Never used for product price, availability, specifications, or comparisons — those come only from the product-data tools in this catalog.
+```
+
+**Примітка:** у внутрішньому діалозі цей інструмент **не** пропонується моделі як вибір — маршрут `store_info` викликає retrieval детерміновано (`IStoreInfoRetrievalService`), як і `recommend`. MCP-інструмент існує для зовнішніх MCP-клієнтів (002 research.md §2).

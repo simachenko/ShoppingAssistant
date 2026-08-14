@@ -30,7 +30,7 @@ public class NotFoundHonestyTests
             chatClient, new FakeToolCatalog(), capture,
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             session, "Is the Nokia 3310 Pro in stock?", CancellationToken.None);
@@ -52,7 +52,7 @@ public class NotFoundHonestyTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         await orchestrator.ProcessMessageAsync(session, "Tell me about the XYZ9000", CancellationToken.None);
 
@@ -71,7 +71,7 @@ public class NotFoundHonestyTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(session, "compare the first one and the second one", CancellationToken.None);
 

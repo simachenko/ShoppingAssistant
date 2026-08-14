@@ -24,6 +24,7 @@ public sealed partial class ConversationOrchestrator(
     IToolResultCapture resultCapture,
     ExtractionStage extractionStage,
     IRecommendationService recommendationService,
+    IStoreInfoRetrievalService storeInfoRetrievalService,
     TurnResourceBudgetGuard budgetGuard,
     RequestGuardrailOptions guardrailOptions,
     TurnMetrics metrics,
@@ -72,6 +73,7 @@ public sealed partial class ConversationOrchestrator(
                     Route.Smalltalk => await HandleSmalltalkAsync(admittedMessage, ct),
                     Route.Unsupported => HandleUnsupported(),
                     Route.Recommend => await HandleRecommendAsync(session, ct),
+                    Route.StoreInfo => await HandleStoreInfoAsync(session, admittedMessage, intent, ct),
                     _ => await RunLegacyToolContinuationAsync(session, route, ct),
                 };
             }, cancellationToken);
@@ -166,6 +168,17 @@ public sealed partial class ConversationOrchestrator(
                     }
 
                     result = AdvisorTurnResult.ForAnswer(narrationBuilder.ToString());
+                    break;
+                }
+
+            case Route.StoreInfo:
+                {
+                    // Buffered rather than token-streamed, for the same reason the `recommend`
+                    // route below is: output validation's grounding check (FR-088) must see the
+                    // whole narration before any of it reaches the client, and an ungrounded
+                    // policy claim cannot be un-sent once streamed.
+                    result = await HandleStoreInfoAsync(session, admittedMessage, intent, cancellationToken);
+                    yield return StreamingTurnUpdate.ForToken(result.Message ?? string.Empty);
                     break;
                 }
 
@@ -313,6 +326,89 @@ public sealed partial class ConversationOrchestrator(
         var narration = await NarrateRecommendationAsync(session.CurrentRequirement, recommendation, cancellationToken);
         return AdvisorTurnResult.ForRecommendation(narration, recommendation);
     }
+
+    /// <summary>
+    /// The `store_info` route (spec.md 002 FR-003/FR-007–FR-010). Structurally the same shape as
+    /// <see cref="HandleRecommendAsync"/> — a deterministic terminal call, then narration whose
+    /// only factual input is an Evidence Envelope built from that call's result — which is what
+    /// makes "answers are grounded only in retrieved fragments" a property of the code path rather
+    /// than an instruction the model is asked to honor.
+    /// <para>
+    /// No product tool is reachable from here (FR-004), and this route is the only one that can
+    /// reach store-knowledge retrieval (FR-005): both directions are enforced by the route's own
+    /// handling, not by prompt wording.
+    /// </para>
+    /// </summary>
+    private async Task<AdvisorTurnResult> HandleStoreInfoAsync(
+        ConversationSession session, string userMessage, StructuredIntent? intent, CancellationToken cancellationToken)
+    {
+        var language = intent?.Language ?? session.CurrentRequirement.Language;
+
+        StoreInfoAnswer answer;
+        try
+        {
+            answer = await storeInfoRetrievalService.RetrieveAsync(userMessage, language, cancellationToken);
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested is false)
+        {
+            // FR-028: an unreachable knowledge base is an honest, retryable turn failure — never
+            // the "I couldn't find that in our documents" answer, which would assert that a search
+            // actually ran and found nothing, and never ungrounded narration from the model.
+            throw new TurnBudgetExceededException(
+                "I couldn't reach our store information right now, so I can't answer that yet.", degraded: true);
+        }
+
+        var envelope = EvidenceEnvelopeBuilder.ForStoreInfo(answer, language);
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            // CA1873 does not recognize this guard for source-generated log methods. The argument
+            // it flags joins at most StoreInfoOptions.MaxMatches (6) short ids and only runs when
+            // Information logging is on, so the flagged cost is not real here — and FR-026 wants
+            // the cited documents themselves observable, not merely how many there were.
+#pragma warning disable CA1873
+            LogStoreInfoRetrieved(answer.Matches.Count, string.Join(",", envelope.Citations.Select(c => c.DocumentId)));
+#pragma warning restore CA1873
+        }
+
+        // FR-009: with no evidence there is nothing to narrate, so no narration call is made at
+        // all. Spending one here could only produce a less honest phrasing of "I don't know."
+        if (!answer.HasEvidence)
+        {
+            return AdvisorTurnResult.ForStoreInfoAnswer(
+                Append(StoreInfoMessages.NotFound(language), intent, language), envelope.Citations);
+        }
+
+        // FR-029: the shopper's language, not the session's stored requirement language and not
+        // the retrieved document's. A store-policy question rarely carries a requirement patch, so
+        // relying on session state here answered Ukrainian questions in English.
+        var response = await chatClient.GetResponseAsync(
+            NarrationPrompt.BuildMessages(session.CurrentRequirement, envelope, language),
+            cancellationToken: cancellationToken);
+        LogNarrationProduced(NarrationPrompt.PromptVersion);
+
+        var validated = OutputValidationStage.Validate(response.Text, envelope);
+        if (!string.Equals(validated, response.Text, StringComparison.Ordinal))
+        {
+            metrics.GroundingFailure.Add(1);
+        }
+
+        return AdvisorTurnResult.ForStoreInfoAnswer(Append(validated, intent, language), envelope.Citations);
+    }
+
+    /// <summary>
+    /// FR-006: a message that also asked a product question gets that part acknowledged rather
+    /// than silently dropped. Appended after output validation on purpose — this text is
+    /// deterministic application copy, not a narrated claim, so it must not be scanned as one.
+    /// </summary>
+    private static string Append(string message, StructuredIntent? intent, string? language) =>
+        intent?.SecondaryIntent is Intent.ProductFact or Intent.Compare or Intent.Recommend or Intent.Checkout
+            ? message + StoreInfoMessages.ProductQuestionNotAnswered(language)
+            : message;
+
+    /// <summary>spec.md 002 FR-026: which documents grounded an answer must be observable, not
+    /// only inferable from the reply text the shopper happened to receive.</summary>
+    [LoggerMessage(Level = LogLevel.Information, Message = "Store info retrieved: matchCount={MatchCount} citedDocumentIds={CitedDocumentIds}")]
+    private partial void LogStoreInfoRetrieved(int matchCount, string citedDocumentIds);
 
     /// <summary>
     /// The turn-processing cycle's constrained-narration stage for `recommend` (spec.md

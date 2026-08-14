@@ -32,7 +32,12 @@ public static class ConversationApiMapper
             null,
             Url: result.CheckoutLink!.Url,
             ProductIds: result.CheckoutLink.ProductIds),
-        "answer" => new ConversationTurnResponse("answer", result.Message, null, null, null),
+        // Citations ride along only when the turn actually produced them (a `store_info` turn) —
+        // a `smalltalk` answer maps to the identical shape with the field absent (spec.md 002
+        // FR-008, contracts/advisor-conversation-api-additions.md).
+        "answer" => new ConversationTurnResponse(
+            "answer", result.Message, null, null, null,
+            Citations: result.Citations?.Select(ToCitationResponse).ToList()),
         "unsupported" => new ConversationTurnResponse("unsupported", result.Message, null, null, null),
         "error" => new ConversationTurnResponse("error", result.Message, null, null, null, Degraded: result.Degraded),
         _ => throw new NotSupportedException($"Unknown turn result type '{result.Type}'."),
@@ -55,6 +60,9 @@ public static class ConversationApiMapper
                 : new MoneyResponse(session.CurrentRequirement.Budget.Amount, session.CurrentRequirement.Budget.Currency),
             session.CurrentRequirement.RequiredFeatures,
             session.CurrentRequirement.Preferences));
+
+    private static CitationResponse ToCitationResponse(Citation citation) =>
+        new(citation.DocumentId, citation.DocumentTitle, citation.ChunkId);
 
     private static RecommendedItemResponse ToItemResponse(RecommendedItem item) => new(
         item.Candidate.ProductId,

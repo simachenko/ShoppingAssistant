@@ -113,5 +113,6 @@ public class TurnResourceBudgetTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
+            new FakeStoreInfoRetrievalService(),
             new TurnResourceBudgetGuard(options), new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 }

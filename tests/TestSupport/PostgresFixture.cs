@@ -10,7 +10,11 @@ namespace TestSupport;
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
+    // pgvector's image rather than stock postgres:16-alpine: ProductAdvisor's migrations declare a
+    // `vector` column type, so its CREATE EXTENSION vector fails against an image where the
+    // extension binary is not installed at all. A strict superset of Postgres 16 — Catalog and
+    // Pricing, which use no extension, behave identically on it.
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("pgvector/pgvector:pg16")
         .WithDatabase("testdb")
         .WithUsername("postgres")
         .WithPassword("postgres")

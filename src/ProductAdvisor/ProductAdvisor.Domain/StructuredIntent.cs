@@ -3,11 +3,13 @@ using System.Text.Json.Serialization;
 namespace ProductAdvisor.Domain;
 
 /// <summary>
-/// Closed set of turn intents (spec.md FR-048/FR-049). An extraction result naming anything
-/// outside this set is a schema-validation failure, never a new, unrecognized route.
-/// <see cref="JsonStringEnumMemberNameAttribute"/> pins the wire value to spec.md's literal
-/// `product_fact` rather than the naming-policy-transformed default (`productFact`), so the
-/// extraction prompt's instructions and the actual deserialized wire format never disagree.
+/// Closed set of turn intents (spec.md FR-048/FR-049; extended by spec.md 002 FR-002 with
+/// <see cref="StoreInfo"/>). An extraction result naming anything outside this set is a
+/// schema-validation failure, never a new, unrecognized route.
+/// <see cref="JsonStringEnumMemberNameAttribute"/> pins the wire values to spec.md's literals
+/// `product_fact`/`store_info` rather than the naming-policy-transformed defaults
+/// (`productFact`/`storeInfo`), so the extraction prompt's instructions and the actual
+/// deserialized wire format never disagree.
 /// </summary>
 public enum Intent
 {
@@ -20,6 +22,14 @@ public enum Intent
     Checkout,
     Smalltalk,
     Unsupported,
+
+    /// <summary>
+    /// A question about the store's own policies — delivery, payment, returns, warranty, loyalty,
+    /// contacts (spec.md 002 FR-002). Answered only from retrieved store documents, never from
+    /// product data (FR-004/FR-005).
+    /// </summary>
+    [JsonStringEnumMemberName("store_info")]
+    StoreInfo,
 }
 
 /// <summary>
@@ -62,4 +72,16 @@ public sealed record StructuredIntent
     public IReadOnlyList<string> MissingFields { get; init; } = [];
     public required double Confidence { get; init; }
     public string Language { get; init; } = "en";
+
+    /// <summary>
+    /// A second, distinct request present in the same message that <see cref="Intent"/> does not
+    /// cover (spec.md 002 FR-006) — e.g. "is this in stock, and what's your return window?".
+    /// Null when the message asks one thing.
+    /// </summary>
+    /// <remarks>
+    /// The cycle still processes exactly one intent per turn: this field does not create a second
+    /// route, it only lets the turn honestly acknowledge the part it is not answering instead of
+    /// dropping it silently, which is the failure FR-006 exists to prevent.
+    /// </remarks>
+    public Intent? SecondaryIntent { get; init; }
 }

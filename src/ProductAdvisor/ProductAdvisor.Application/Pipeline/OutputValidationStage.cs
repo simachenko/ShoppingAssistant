@@ -46,6 +46,12 @@ public static partial class OutputValidationStage
         Comparison comparison =>
             $"Compared {comparison.Rows.Count} product(s) across {comparison.Criteria.Count} criteria — see the details below.",
         CheckoutLink checkoutLink => $"Here's your checkout link: {checkoutLink.Url}",
+        // spec.md 002 FR-009/FR-010: a store-policy narration that stated something the retrieved
+        // fragments don't support is replaced by a statement that claims nothing of its own and
+        // points at the cited sources — never by a "best guess" reconstruction of the answer.
+        StoreInfoAnswer storeInfo => storeInfo.HasEvidence
+            ? StoreInfoMessages.SeeCitedDocuments(envelope.AnswerLanguage)
+            : StoreInfoMessages.NotFound(envelope.AnswerLanguage),
         _ => "Here's what I found.",
     };
 

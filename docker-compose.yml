@@ -11,7 +11,11 @@ x-otel-env: &otel-env
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector's own image rather than stock postgres:16: the advisor schema's store-policy
+    # knowledge base declares a `vector` column type, so its migration's CREATE EXTENSION vector
+    # fails against an image without the extension available (002 research.md §6). Same Postgres
+    # 16 server underneath — catalogdb/pricingdb are unaffected.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -73,6 +77,10 @@ services:
       LlmProvider__Endpoint: "${LLM_PROVIDER_ENDPOINT:-}"
       LlmProvider__ApiKey: "${LLM_PROVIDER_API_KEY:-}"
       LlmProvider__Model: "${LLM_PROVIDER_MODEL:-}"
+      # Embeddings for store-policy retrieval (002 research.md §7) — same provider/credential as
+      # the chat client, but almost always a different model.
+      LlmProvider__EmbeddingModel: "${LLM_PROVIDER_EMBEDDING_MODEL:-}"
+      SeedDemoData: "true"
       InternalApiKey: "${INTERNAL_API_KEY:-dev-internal-api-key}"
     depends_on:
       postgres:

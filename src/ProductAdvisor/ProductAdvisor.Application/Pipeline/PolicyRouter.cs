@@ -16,6 +16,13 @@ public enum Route
     Smalltalk,
     Unsupported,
     Clarify,
+
+    /// <summary>
+    /// A store-policy question, answered from retrieved store documents (spec.md 002 FR-002).
+    /// Like <see cref="Recommend"/>, its terminal call is invoked deterministically by the
+    /// orchestrator rather than offered to the language model as a free tool choice.
+    /// </summary>
+    StoreInfo,
 }
 
 /// <summary>
@@ -48,6 +55,12 @@ public static class PolicyRouter
         {
             Intent.Smalltalk => Route.Smalltalk,
             Intent.Unsupported => Route.Unsupported,
+            // Unconditional, unlike the product routes below: a store-policy question is
+            // self-contained — it names no product that must first resolve, so there is no
+            // precondition whose absence would make routing it premature (spec.md 002 FR-024,
+            // research.md §3). Insufficient *evidence* is handled later, by retrieval returning
+            // no matches (FR-009), never by refusing to route here.
+            Intent.StoreInfo => Route.StoreInfo,
             Intent.Recommend => requirement.HasEssentialInformation ? Route.Recommend : Route.Clarify,
             Intent.Compare => intent.ProductReferences.Count >= 2 ? Route.Compare : Route.Clarify,
             Intent.Checkout => intent.ProductReferences.Count >= 1 ? Route.Checkout : Route.Clarify,

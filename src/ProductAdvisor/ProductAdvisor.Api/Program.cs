@@ -4,12 +4,15 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Pgvector.EntityFrameworkCore;
 using ProductAdvisor.Application;
 using ProductAdvisor.Application.Contracts;
 using ProductAdvisor.Application.Pipeline;
 using ProductAdvisor.Domain;
 using ProductAdvisor.Infrastructure;
+using ProductAdvisor.Infrastructure.Rag;
 using ProductAdvisor.Infrastructure.Repositories;
+using ProductAdvisor.Infrastructure.SeedData;
 using ProductAdvisor.Infrastructure.Tools;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,8 +24,12 @@ var maxRequestBodyBytes = builder.Configuration.GetValue(
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = maxRequestBodyBytes);
 
 builder.AddServiceDefaults();
-builder.AddNpgsqlDbContext<AdvisorDbContext>("advisordb");
+// UseVector() registers pgvector's Npgsql type mapping — without it the `vector` column type the
+// DocumentChunk mapping declares cannot be read or written (002 research.md §6).
+builder.AddNpgsqlDbContext<AdvisorDbContext>(
+    "advisordb", configureDbContextOptions: o => o.UseNpgsql(npgsql => npgsql.UseVector()));
 builder.AddAdvisorChatClient();
+builder.AddAdvisorEmbeddingGenerator();
 builder.AddAdvisorHttpClients();
 
 builder.Services.AddSingleton<TurnMetrics>();
@@ -34,8 +41,12 @@ builder.Services.AddScoped<IToolResultCapture, ToolResultCapture>();
 builder.Services.AddScoped<ProductComparisonService>();
 builder.Services.AddScoped<DataAccessTools>();
 builder.Services.AddScoped<ComputeTools>();
+builder.Services.AddScoped<RagTools>();
 builder.Services.AddScoped<IAdvisorToolCatalog, AdvisorToolCatalog>();
 builder.Services.AddScoped<IRecommendationService, RecommendationService>();
+builder.Services.Configure<StoreInfoOptions>(builder.Configuration.GetSection(StoreInfoOptions.SectionName));
+builder.Services.AddSingleton<IStoreContext, ConfiguredStoreContext>();
+builder.Services.AddScoped<IStoreInfoRetrievalService, StoreInfoRetrievalService>();
 builder.Services.AddScoped<ExtractionStage>();
 builder.Services.Configure<TurnResourceBudgetOptions>(builder.Configuration.GetSection(TurnResourceBudgetOptions.SectionName));
 builder.Services.AddSingleton(sp =>
@@ -51,7 +62,8 @@ builder.Services.AddSingleton<ConversationTurnGate>();
 builder.Services.AddMcpServer()
     .WithHttpTransport()
     .WithTools<DataAccessTools>()
-    .WithTools<ComputeTools>();
+    .WithTools<ComputeTools>()
+    .WithTools<RagTools>();
 
 var app = builder.Build();
 
@@ -68,6 +80,31 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AdvisorDbContext>();
     await db.Database.MigrateAsync();
+
+    // Demo knowledge base (002 research.md §12) — same opt-in flag and idempotent shape as
+    // Catalog/Pricing's own demo seeding. A seeding failure (e.g. the embedding provider is
+    // unreachable at startup) must not stop the service: store-policy answers then honestly
+    // report finding nothing (FR-009), while every product capability keeps working.
+    if (app.Configuration.GetValue<bool>("SeedDemoData"))
+    {
+        try
+        {
+            await StoreInfoSeeder.SeedAsync(
+                db,
+                scope.ServiceProvider.GetRequiredService<IEmbeddingGenerator<string, Embedding<float>>>(),
+                scope.ServiceProvider.GetRequiredService<IStoreContext>().CurrentStoreId);
+        }
+#pragma warning disable CA1031 // Intentional: demo seeding must never block startup (see above).
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            // CA1848 (LoggerMessage delegates) does not apply usefully to a startup path that runs
+            // exactly once, and top-level statements cannot host the source-generated partial.
+#pragma warning disable CA1848
+            app.Logger.LogWarning(ex, "Store-info demo seeding skipped: the knowledge base will be empty.");
+#pragma warning restore CA1848
+        }
+    }
 }
 
 // POST /api/conversations — start a new session (contracts/advisor-conversation-api.md).

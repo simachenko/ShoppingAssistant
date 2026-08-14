@@ -50,4 +50,35 @@ public static class AdvisorAiExtensions
 
         return builder;
     }
+
+    /// <summary>
+    /// Registers the embedding generator backing store-knowledge retrieval (002 research.md §7).
+    /// Reuses the same provider endpoint/credential as the chat client — an embedding model is
+    /// simply a different model on the same OpenAI-compatible provider — so no second provider
+    /// account or client stack is introduced. The model name is its own setting because chat and
+    /// embedding models are almost never the same model.
+    /// </summary>
+    public static IHostApplicationBuilder AddAdvisorEmbeddingGenerator(this IHostApplicationBuilder builder)
+    {
+        var endpoint = builder.Configuration["LlmProvider:Endpoint"];
+        var apiKey = builder.Configuration["LlmProvider:ApiKey"];
+        var embeddingModel = builder.Configuration["LlmProvider:EmbeddingModel"];
+
+        builder.Services.AddEmbeddingGenerator(_ =>
+        {
+            var options = new OpenAIClientOptions();
+            if (!string.IsNullOrWhiteSpace(endpoint))
+            {
+                options.Endpoint = new Uri(endpoint);
+            }
+
+            var credential = new ApiKeyCredential(string.IsNullOrWhiteSpace(apiKey) ? "unset" : apiKey);
+            var openAiClient = new OpenAIClient(credential, options);
+            return openAiClient
+                .GetEmbeddingClient(string.IsNullOrWhiteSpace(embeddingModel) ? "text-embedding-3-small" : embeddingModel)
+                .AsIEmbeddingGenerator();
+        });
+
+        return builder;
+    }
 }

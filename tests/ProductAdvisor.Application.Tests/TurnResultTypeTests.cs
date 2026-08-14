@@ -21,7 +21,7 @@ public class TurnResultTypeTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "write me a poem", CancellationToken.None);
@@ -38,7 +38,7 @@ public class TurnResultTypeTests
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
             new ExtractionStage(chatClient, TestTurnMetrics.Instance),
             new FakeRecommendationService(new Recommendation { RecommendationId = Guid.NewGuid(), Items = [] }),
-            TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
+            new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "hello!", CancellationToken.None);
@@ -61,7 +61,7 @@ public class TurnResultTypeTests
             ExtractionJson.Recommend("smartphones", 15000m, "UAH"), "Nothing fits right now.");
         var orchestrator = new ConversationOrchestrator(
             chatClient, new FakeToolCatalog(), new ToolResultCapture(),
-            new ExtractionStage(chatClient, TestTurnMetrics.Instance), new FakeRecommendationService(recommendation), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
+            new ExtractionStage(chatClient, TestTurnMetrics.Instance), new FakeRecommendationService(recommendation), new FakeStoreInfoRetrievalService(), TestBudgetGuard.Generous, new RequestGuardrailOptions(), TestTurnMetrics.Instance, TestLogger.Instance);
 
         var result = await orchestrator.ProcessMessageAsync(
             new ConversationSession(Guid.NewGuid(), "test-user"), "I need a smartphone under 15000 UAH", CancellationToken.None);
