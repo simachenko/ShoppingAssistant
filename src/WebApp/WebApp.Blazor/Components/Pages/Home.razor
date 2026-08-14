@@ -283,8 +283,11 @@
             // renders it (line ~40); including it here too duplicated the same question text in
             // both the plain chat bubble and the alert box.
             "clarification" => "",
-            "recommendation" or "comparison" or "checkoutLink" => turn.Message ?? "",
-            _ => "",
+            // Every other type carries its text in Message. Defaulting to Message rather than ""
+            // matters: an allow-list here silently blanked `answer`, `unsupported` and `error`,
+            // so a store-policy reply (and any smalltalk reply) flashed on screen during
+            // streaming and then vanished when the completed turn replaced it with nothing.
+            _ => turn.Message ?? "",
         };
         _history.Add(new HistoryEntry("assistant", narration, turn));
     }

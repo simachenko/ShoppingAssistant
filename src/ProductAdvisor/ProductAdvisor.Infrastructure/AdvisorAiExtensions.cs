@@ -20,6 +20,32 @@ public static class AdvisorAiExtensions
         var apiKey = builder.Configuration["LlmProvider:ApiKey"];
         var model = builder.Configuration["LlmProvider:Model"];
 
+        // Silently falling back to a hard-coded model produced a failure that looked like a
+        // product defect rather than a configuration one: a smaller default model failed to
+        // extract the category and misread "15,000 UAH" as 15 UAH, so every fully-specified
+        // request came back asking for more detail. The credential has the same property — an
+        // unset key turns every turn into "I didn't quite catch that". Neither is acceptable to
+        // guess at in Production.
+        if (builder.Environment.IsProduction())
+        {
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException(
+                    "LlmProvider:ApiKey is not configured. Set the environment variable " +
+                    "LlmProvider__ApiKey on this service — without it every conversation turn " +
+                    "fails extraction and degrades to a generic clarification.");
+            }
+
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                throw new InvalidOperationException(
+                    "LlmProvider:Model is not configured. Set the environment variable " +
+                    "LlmProvider__Model on this service — the built-in fallback is a smaller " +
+                    "model that extracts requirements unreliably, which surfaces as the advisor " +
+                    "asking for details the shopper already gave.");
+            }
+        }
+
         // spec.md FR-071–FR-079 (data-model.md TurnResourceBudget): these two loop-shaped limits
         // are enforced by the function-invocation middleware's own configuration rather than a
         // separate counter — see TurnResourceBudgetGuard for the empirically-verified behavior
