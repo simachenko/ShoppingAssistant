@@ -15,6 +15,23 @@ public static class ServiceEndpointConfigurationExtensions
         var configuredHost = configuration[$"RenderExternalHosts:{serviceName}"];
         if (string.IsNullOrWhiteSpace(configuredHost))
         {
+            // On Render the logical name cannot resolve: free web services have no private
+            // network, so `http://advisor-api` fails at the connection level the moment it is
+            // used. Falling back to it there produced a uniquely undiagnosable failure — the
+            // dependency was simply never contacted, so it never woke and logged nothing at all,
+            // while the readiness screen kept reporting it as "not ready yet" indefinitely.
+            // Fail at startup instead, naming the exact missing variable.
+            if (IsRunningOnRender(configuration))
+            {
+                throw new InvalidOperationException(
+                    $"RenderExternalHosts:{serviceName} is not configured, but this service is running on " +
+                    $"Render, where the logical name 'http://{serviceName}' cannot resolve. Set the " +
+                    $"environment variable RenderExternalHosts__{serviceName} on this service to " +
+                    $"{serviceName}'s public hostname (render.yaml wires this via `fromService`; a service " +
+                    "added after the Blueprint was last applied will be missing it until the Blueprint is " +
+                    "re-synced).");
+            }
+
             return new Uri($"http://{serviceName}");
         }
 
@@ -31,4 +48,13 @@ public static class ServiceEndpointConfigurationExtensions
 
         return endpoint;
     }
+
+    /// <summary>
+    /// Render sets <c>RENDER=true</c> on every service it runs. Used only to decide whether a
+    /// missing external host is a fatal misconfiguration (it is, there) or the normal case
+    /// (Aspire/Compose, where the logical name resolves through service discovery).
+    /// </summary>
+    private static bool IsRunningOnRender(IConfiguration configuration) =>
+        !string.IsNullOrWhiteSpace(configuration["RENDER"])
+        || !string.IsNullOrWhiteSpace(configuration["RENDER_EXTERNAL_HOSTNAME"]);
 }
