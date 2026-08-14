@@ -26,7 +26,15 @@ public static class AdvisorAiExtensions
         // request came back asking for more detail. The credential has the same property — an
         // unset key turns every turn into "I didn't quite catch that". Neither is acceptable to
         // guess at in Production.
-        if (builder.Environment.IsProduction())
+        // Scoped to Render rather than to Production generally: a test host legitimately boots
+        // this app with Production configuration to exercise unrelated guards, and must not be
+        // forced to supply language-model credentials it never uses. Mirrors the same check in
+        // ServiceDefaults' ServiceEndpointConfigurationExtensions (duplicated rather than shared
+        // because Infrastructure does not reference ServiceDefaults).
+        var onRender = !string.IsNullOrWhiteSpace(builder.Configuration["RENDER"])
+            || !string.IsNullOrWhiteSpace(builder.Configuration["RENDER_EXTERNAL_HOSTNAME"]);
+
+        if (onRender)
         {
             if (string.IsNullOrWhiteSpace(apiKey))
             {
