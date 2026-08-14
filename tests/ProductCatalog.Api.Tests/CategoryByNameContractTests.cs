@@ -6,7 +6,8 @@ using Xunit;
 
 namespace ProductCatalog.Api.Tests;
 
-public sealed class CategoryByNameContractTests(CatalogApiTestFixture fixture) : IClassFixture<CatalogApiTestFixture>
+[Collection(CatalogApiCollection.Name)]
+public sealed class CategoryByNameContractTests(CatalogApiTestFixture fixture)
 {
     [Fact]
     public async Task Known_category_name_resolves_case_insensitively()

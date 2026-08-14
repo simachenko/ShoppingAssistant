@@ -5,7 +5,8 @@ using Xunit;
 
 namespace ProductCatalog.Api.Tests;
 
-public sealed class SearchProductsContractTests(CatalogApiTestFixture fixture) : IClassFixture<CatalogApiTestFixture>
+[Collection(CatalogApiCollection.Name)]
+public sealed class SearchProductsContractTests(CatalogApiTestFixture fixture)
 {
     [Fact]
     public async Task Search_by_category_returns_only_matching_seeded_products()

@@ -6,7 +6,8 @@ using Xunit;
 
 namespace PricingAvailability.Api.Tests;
 
-public sealed class BatchOffersContractTests(PricingApiTestFixture fixture) : IClassFixture<PricingApiTestFixture>
+[Collection(PricingApiCollection.Name)]
+public sealed class BatchOffersContractTests(PricingApiTestFixture fixture)
 {
     [Fact]
     public async Task Single_offer_lookup_returns_the_seeded_offer()

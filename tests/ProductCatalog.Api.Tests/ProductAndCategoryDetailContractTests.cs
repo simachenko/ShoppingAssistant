@@ -6,7 +6,8 @@ using Xunit;
 
 namespace ProductCatalog.Api.Tests;
 
-public sealed class ProductAndCategoryDetailContractTests(CatalogApiTestFixture fixture) : IClassFixture<CatalogApiTestFixture>
+[Collection(CatalogApiCollection.Name)]
+public sealed class ProductAndCategoryDetailContractTests(CatalogApiTestFixture fixture)
 {
     [Fact]
     public async Task Known_product_id_returns_detail_including_description_and_isActive()

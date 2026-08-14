@@ -4,7 +4,8 @@ using Xunit;
 namespace ProductCatalog.Api.Tests;
 
 /// <summary>Proves FR-029: Catalog is never reachable without the internal service credential.</summary>
-public sealed class InternalApiKeyAuthContractTests(CatalogApiTestFixture fixture) : IClassFixture<CatalogApiTestFixture>
+[Collection(CatalogApiCollection.Name)]
+public sealed class InternalApiKeyAuthContractTests(CatalogApiTestFixture fixture)
 {
     [Fact]
     public async Task Request_with_no_internal_api_key_header_is_rejected()

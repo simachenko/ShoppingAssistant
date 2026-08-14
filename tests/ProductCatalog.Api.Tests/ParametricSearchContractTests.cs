@@ -7,7 +7,8 @@ using Xunit;
 
 namespace ProductCatalog.Api.Tests;
 
-public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture) : IClassFixture<CatalogApiTestFixture>
+[Collection(CatalogApiCollection.Name)]
+public sealed class ParametricSearchContractTests(CatalogApiTestFixture fixture)
 {
     [Fact]
     public async Task Gte_characteristic_filter_returns_only_products_meeting_the_threshold()
